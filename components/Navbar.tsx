@@ -14,24 +14,24 @@ export default function Navbar() {
 
   return (
     <header className="bg-gray-900 text-white border-b border-gray-800 sticky top-0 z-40">
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="font-black text-xl tracking-tight text-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="flex items-center gap-4 sm:gap-6 overflow-x-auto">
+          <span className="font-black text-lg sm:text-xl tracking-tight text-white whitespace-nowrap">
             🎪 DECOR<span className="text-blue-500">OPS</span>
           </span>
 
-          <nav className="flex items-center gap-2">
+          <nav className="flex items-center gap-1 sm:gap-2">
             <Link
-              href="/elements"
-              className={`px-3 py-2 rounded-lg text-xs md:text-sm font-bold transition ${
-                pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+              href="/handovers"
+              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                pathname.startsWith("/handovers") ? "bg-purple-700 text-white shadow" : "text-purple-300 hover:bg-gray-800"
               }`}
             >
-              📦 Elements
+              📋 Wedding Handovers
             </Link>
             <Link
               href="/components"
-              className={`px-3 py-2 rounded-lg text-xs md:text-sm font-bold transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
                 pathname === "/components" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
               }`}
             >
@@ -39,19 +39,27 @@ export default function Navbar() {
             </Link>
             <Link
               href="/entertainment"
-              className={`px-3 py-2 rounded-lg text-xs md:text-sm font-bold transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
                 pathname === "/entertainment" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
               }`}
             >
               🎤 Entertainment & SFX
             </Link>
+            <Link
+              href="/elements"
+              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+              }`}
+            >
+              📦 Warehouse Props
+            </Link>
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="text-right hidden sm:block">
+        <div className="flex items-center gap-3">
+          <div className="text-right hidden md:block">
             <p className="text-xs text-gray-400 font-semibold">{user.email}</p>
-            <span className="text-xs uppercase font-black bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800">
+            <span className="text-[10px] uppercase font-black bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800">
               {role}
             </span>
           </div>
