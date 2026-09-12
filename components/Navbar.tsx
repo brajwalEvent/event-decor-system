@@ -15,7 +15,7 @@ export default function Navbar() {
   return (
     <header className="bg-gray-900 text-white border-b border-gray-800 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-6">
           <span className="font-black text-xl tracking-tight text-white">
             🎪 DECOR<span className="text-blue-500">OPS</span>
           </span>
@@ -23,23 +23,27 @@ export default function Navbar() {
           <nav className="flex items-center gap-2">
             <Link
               href="/elements"
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition ${
-                pathname === "/elements"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              className={`px-3 py-2 rounded-lg text-xs md:text-sm font-bold transition ${
+                pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
               }`}
             >
-              📦 Elements (Props & Gear)
+              📦 Elements
             </Link>
             <Link
               href="/components"
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition ${
-                pathname === "/components"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              className={`px-3 py-2 rounded-lg text-xs md:text-sm font-bold transition ${
+                pathname === "/components" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
               }`}
             >
-              🏛️ Components (Stages & Gates)
+              🏛️ Decor Components
+            </Link>
+            <Link
+              href="/entertainment"
+              className={`px-3 py-2 rounded-lg text-xs md:text-sm font-bold transition ${
+                pathname === "/entertainment" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+              }`}
+            >
+              🎤 Entertainment & SFX
             </Link>
           </nav>
         </div>
