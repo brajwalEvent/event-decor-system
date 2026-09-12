@@ -495,14 +495,16 @@ export default function HandoverWorkspace() {
                   </span>
                 )}
               </button>
-              <button
-                onClick={() => setActiveTab("audit")}
-                className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1 ${
-                  activeTab === "audit" ? "bg-white text-blue-900 shadow" : "text-gray-600"
-                }`}
-              >
-                📜 Audit Log ({handover.auditLogs?.length || 0})
-              </button>
+              {isSuperAdmin && (
+  <button
+    onClick={() => setActiveTab("audit")}
+    className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1 ${
+      activeTab === "audit" ? "bg-white text-blue-900 shadow" : "text-gray-600"
+    }`}
+  >
+    📜 Audit Log ({handover.auditLogs?.length || 0})
+  </button>
+)}
             </div>
 
             {/* Workflow Action Buttons */}
@@ -1043,7 +1045,7 @@ export default function HandoverWorkspace() {
         )}
 
         {/* VIEW 3: AUDIT & MODIFICATION LOG (WHO, WHEN, REMARKS) */}
-        {activeTab === "audit" && (
+        {activeTab === "audit" && isSuperAdmin && (
           <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-4">
             <div className="border-b pb-3">
               <h3 className="text-xl font-black text-gray-900">📜 Modification & Audit Trail</h3>

@@ -15,7 +15,6 @@ import { getAuth, createUserWithEmailAndPassword, signOut } from "firebase/auth"
 import { useAuth } from "../../../context/AuthContext";
 import { useRouter } from "next/navigation";
 
-// Secondary Firebase app instance so Super Admin doesn't get logged out when creating a user
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -39,21 +38,18 @@ export default function SuperAdminTeamPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // New Team Member Form
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [assignedRole, setAssignedRole] = useState<"sales" | "production">("sales");
 
-  // Protect page: Only Super Admin / Admin
   useEffect(() => {
     if (!loading && (!user || (!isSuperAdmin && role !== "admin"))) {
       router.push("/handovers");
     }
   }, [user, role, isSuperAdmin, loading, router]);
 
-  // Fetch Team
   const fetchTeam = async () => {
     try {
       const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
@@ -68,45 +64,43 @@ export default function SuperAdminTeamPage() {
     if (user && (isSuperAdmin || role === "admin")) fetchTeam();
   }, [user, isSuperAdmin, role]);
 
-  // Handle Add Member
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
 
     try {
-      // 1. Create account via secondary auth (preserves Super Admin session)
+      const cleanEmail = email.trim().toLowerCase();
       const userCredential = await createUserWithEmailAndPassword(
         secondaryAuth,
-        email.trim().toLowerCase(),
+        cleanEmail,
         password
       );
       const newUid = userCredential.user.uid;
-      await signOut(secondaryAuth); // Sign out the secondary instance
+      await signOut(secondaryAuth);
 
-      // 2. Save user profile & role in Firestore
+      // Save user with isFirstLogin: true
       await setDoc(doc(db, "users", newUid), {
         uid: newUid,
         displayName: name.trim(),
         mobile: mobile.trim(),
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         role: assignedRole,
+        isFirstLogin: true, // Requires password change on first sign-in
         createdAt: new Date().toISOString(),
       });
 
-      // 3. If Sales team, add to sales_team directory for handover dropdown
       if (assignedRole === "sales") {
         await setDoc(doc(db, "sales_team", newUid), {
           id: newUid,
           name: name.trim(),
           phone: mobile.trim(),
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           designation: "Sales Lead",
           createdAt: new Date().toISOString(),
         });
       }
 
-      // Reset
       setShowModal(false);
       setName("");
       setMobile("");
@@ -114,7 +108,7 @@ export default function SuperAdminTeamPage() {
       setPassword("");
       setAssignedRole("sales");
       fetchTeam();
-      alert(`✅ Team member ${name} created successfully! They can now log in.`);
+      alert(`✅ Account created! When ${name} logs in for the first time, they will be prompted to create their own permanent password.`);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Failed to create team member.");
@@ -123,13 +117,12 @@ export default function SuperAdminTeamPage() {
     }
   };
 
-  // Delete Member
   const handleDeleteMember = async (id: string, memberEmail: string) => {
     if (memberEmail.toLowerCase() === "event.brajwal@gmail.com") {
       alert("Super Admin account cannot be deleted!");
       return;
     }
-    if (!window.confirm(`Delete team member ${memberEmail}? They will lose access.`)) return;
+    if (!window.confirm(`Delete team member ${memberEmail}?`)) return;
 
     try {
       await deleteDoc(doc(db, "users", id));
@@ -145,17 +138,16 @@ export default function SuperAdminTeamPage() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border-2 border-gray-300 shadow-sm mb-8">
           <div>
             <div className="flex items-center gap-2">
               <span className="bg-red-600 text-white text-xs uppercase font-black px-2 py-0.5 rounded shadow">
                 Super Admin Console
               </span>
-              <h1 className="text-3xl font-black text-gray-900">Team & Role Management</h1>
+              <h1 className="text-3xl font-black text-gray-900">Team & Staff Management</h1>
             </div>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Create and manage credentials for the Front Sales Team and Backend Production Team.
+              Create and manage credentials for Sales and Production. New accounts are prompted to change their password on first sign-in.
             </p>
           </div>
 
@@ -167,10 +159,10 @@ export default function SuperAdminTeamPage() {
           </button>
         </div>
 
-        {/* Team Members List */}
+        {/* Team Table */}
         <div className="bg-white border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm">
-          <div className="p-4 border-b bg-gray-100 flex justify-between items-center">
-            <h2 className="text-sm font-black uppercase text-gray-700">Active Staff & Credentials ({teamMembers.length})</h2>
+          <div className="p-4 border-b bg-gray-100">
+            <h2 className="text-sm font-black uppercase text-gray-700">Active Staff Accounts ({teamMembers.length})</h2>
           </div>
 
           <div className="overflow-x-auto">
@@ -180,14 +172,13 @@ export default function SuperAdminTeamPage() {
                   <th className="p-4">Name</th>
                   <th className="p-4">Mobile</th>
                   <th className="p-4">Email</th>
-                  <th className="p-4">Assigned Department</th>
+                  <th className="p-4">Department</th>
                   <th className="p-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 font-medium">
                 {teamMembers.map((member) => {
                   const isThisSuperAdmin = member.email?.toLowerCase() === "event.brajwal@gmail.com";
-
                   return (
                     <tr key={member.id} className="hover:bg-gray-50">
                       <td className="p-4 font-bold text-gray-900">
@@ -219,9 +210,9 @@ export default function SuperAdminTeamPage() {
                         {!isThisSuperAdmin && (
                           <button
                             onClick={() => handleDeleteMember(member.id, member.email)}
-                            className="text-red-600 hover:text-red-800 font-bold text-xs bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded border border-red-200 transition"
+                            className="text-red-600 hover:text-red-800 font-bold text-xs bg-red-50 px-3 py-1.5 rounded border border-red-200 transition"
                           >
-                            Remove User
+                            Remove
                           </button>
                         )}
                       </td>
@@ -233,22 +224,16 @@ export default function SuperAdminTeamPage() {
           </div>
         </div>
 
-        {/* Modal: Add Team Member Form */}
+        {/* Modal: Add Team Member */}
         {showModal && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-xl max-w-lg w-full p-6 border-2 border-gray-400 shadow-2xl space-y-4">
               <div className="flex justify-between items-center border-b pb-2">
                 <h2 className="text-xl font-black text-gray-900">Add New Team Member</h2>
-                <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-black font-black text-xl">
-                  ✕
-                </button>
+                <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-black font-black text-xl">✕</button>
               </div>
 
-              {error && (
-                <div className="bg-red-50 border border-red-300 text-red-700 p-2.5 rounded text-xs font-bold">
-                  {error}
-                </div>
-              )}
+              {error && <div className="bg-red-50 border border-red-300 text-red-700 p-2.5 rounded text-xs font-bold">{error}</div>}
 
               <form onSubmit={handleAddMember} className="space-y-4">
                 <div>
@@ -287,82 +272,42 @@ export default function SuperAdminTeamPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-black text-gray-800 mb-1">Initial Password *</label>
+                  <label className="block text-xs font-black text-gray-800 mb-1">Temporary Initial Password *</label>
                   <input
                     type="password"
                     required
-                    placeholder="Minimum 6 characters"
+                    placeholder="User will be forced to change this on 1st login"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-sm bg-white"
                   />
                 </div>
 
-                {/* Role Assignment */}
                 <div className="bg-gray-50 p-3 rounded-lg border-2 border-gray-300 space-y-2">
-                  <label className="block text-xs font-black text-gray-900 uppercase">
-                    Assign Role & Permissions *
-                  </label>
-                  
+                  <label className="block text-xs font-black text-gray-900 uppercase">Assign Role *</label>
                   <div className="grid grid-cols-2 gap-3">
-                    <label className={`flex items-start gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition ${
-                      assignedRole === "sales" 
-                        ? "bg-purple-50 border-purple-600 font-black" 
-                        : "bg-white border-gray-300"
-                    }`}>
-                      <input
-                        type="radio"
-                        name="teamRole"
-                        value="sales"
-                        checked={assignedRole === "sales"}
-                        onChange={() => setAssignedRole("sales")}
-                        className="mt-1"
-                      />
+                    <label className={`flex items-start gap-2 p-2.5 rounded-lg border-2 cursor-pointer ${assignedRole === "sales" ? "bg-purple-50 border-purple-600 font-black" : "bg-white border-gray-300"}`}>
+                      <input type="radio" name="teamRole" checked={assignedRole === "sales"} onChange={() => setAssignedRole("sales")} className="mt-1" />
                       <div>
                         <span className="block text-xs font-black text-purple-950">💼 Sales Team</span>
-                        <span className="block text-[11px] text-gray-500 font-medium">
-                          Can only access & create Wedding Handovers.
-                        </span>
+                        <span className="block text-[11px] text-gray-500 font-medium">Handovers only</span>
                       </div>
                     </label>
 
-                    <label className={`flex items-start gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition ${
-                      assignedRole === "production" 
-                        ? "bg-blue-50 border-blue-600 font-black" 
-                        : "bg-white border-gray-300"
-                    }`}>
-                      <input
-                        type="radio"
-                        name="teamRole"
-                        value="production"
-                        checked={assignedRole === "production"}
-                        onChange={() => setAssignedRole("production")}
-                        className="mt-1"
-                      />
+                    <label className={`flex items-start gap-2 p-2.5 rounded-lg border-2 cursor-pointer ${assignedRole === "production" ? "bg-blue-50 border-blue-600 font-black" : "bg-white border-gray-300"}`}>
+                      <input type="radio" name="teamRole" checked={assignedRole === "production"} onChange={() => setAssignedRole("production")} className="mt-1" />
                       <div>
                         <span className="block text-xs font-black text-blue-950">🛠️ Production Team</span>
-                        <span className="block text-[11px] text-gray-500 font-medium">
-                          Manages master inventory, components & execution.
-                        </span>
+                        <span className="block text-[11px] text-gray-500 font-medium">Inventory & Execution</span>
                       </div>
                     </label>
                   </div>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-3 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowModal(false)}
-                    className="px-4 py-2 border-2 border-gray-400 font-bold rounded-lg text-xs"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-5 py-2 bg-black text-white font-black rounded-lg text-xs hover:bg-gray-800 shadow"
-                  >
-                    {submitting ? "Creating Account..." : "Create Team Member"}
+                  <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border font-bold rounded text-xs">Cancel</button>
+                  <button type="submit" disabled={submitting} className="px-5 py-2 bg-black text-white font-black rounded text-xs hover:bg-gray-800 shadow">
+                    {submitting ? "Creating..." : "Create Team Member"}
                   </button>
                 </div>
               </form>
