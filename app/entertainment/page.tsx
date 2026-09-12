@@ -22,11 +22,6 @@ interface Variant {
   pricingUnit: string;
   customUnit?: string;
   notes: string;
-  travelCostAdditional: boolean;
-  foodCostAdditional: boolean;
-  roomsRequired: boolean;
-  roomsCount: number;
-  customAttributes: string[];
 }
 
 export default function EntertainmentPage() {
@@ -55,32 +50,31 @@ export default function EntertainmentPage() {
   // Base Form Fields
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Sound & Audio");
+  const [writtenNotes, setWrittenNotes] = useState("");
+
+  // PRICING LOGIC: Toggle between Single Price vs Multiple Variants
+  const [hasVariants, setHasVariants] = useState(false);
+  
+  // Single Price State (Only used when hasVariants is FALSE)
   const [price, setPrice] = useState<number>(0);
   const [pricingUnit, setPricingUnit] = useState("Per Event");
   const [customUnit, setCustomUnit] = useState("");
-  const [writtenNotes, setWrittenNotes] = useState("");
 
-  // Attributes / Riders
+  // Variants Array (Only used when hasVariants is TRUE)
+  const [variants, setVariants] = useState<Variant[]>([]);
+  const [varName, setVarName] = useState("");
+  const [varPrice, setVarPrice] = useState<number>(0);
+  const [varUnit, setVarUnit] = useState("Per Event");
+  const [varCustomUnit, setVarCustomUnit] = useState("");
+  const [varNotes, setVarNotes] = useState("");
+
+  // Attributes / Riders (Common to the service)
   const [travelCostAdditional, setTravelCostAdditional] = useState(false);
   const [foodCostAdditional, setFoodCostAdditional] = useState(false);
   const [roomsRequired, setRoomsRequired] = useState(false);
   const [roomsCount, setRoomsCount] = useState<number>(1);
   const [customAttributes, setCustomAttributes] = useState<string[]>([]);
   const [newAttributeInput, setNewAttributeInput] = useState("");
-
-  // Variants Array
-  const [variants, setVariants] = useState<Variant[]>([]);
-
-  // Variant Add Inputs
-  const [varName, setVarName] = useState("");
-  const [varPrice, setVarPrice] = useState<number>(0);
-  const [varUnit, setVarUnit] = useState("Per Event");
-  const [varCustomUnit, setVarCustomUnit] = useState("");
-  const [varNotes, setVarNotes] = useState("");
-  const [varTravel, setVarTravel] = useState(false);
-  const [varFood, setVarFood] = useState(false);
-  const [varRooms, setVarRooms] = useState(false);
-  const [varRoomsCount, setVarRoomsCount] = useState<number>(1);
 
   // Media
   const [imageFiles, setImageFiles] = useState<File[]>([]);
@@ -108,7 +102,7 @@ export default function EntertainmentPage() {
       const snap = await getDocs(q);
       setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
-      console.error("Error fetching entertainment items:", err);
+      console.error("Error fetching items:", err);
     }
   };
 
@@ -123,7 +117,7 @@ export default function EntertainmentPage() {
 
     const max20MB = 20 * 1024 * 1024;
     if (file.size > max20MB) {
-      alert("❌ Video exceeds 20MB limit! Please choose a smaller clip.");
+      alert("❌ Video exceeds 20MB limit! Please choose a smaller video.");
       e.target.value = "";
       setVideoFile(null);
       return;
@@ -169,49 +163,37 @@ export default function EntertainmentPage() {
     }
   };
 
-  // Add Custom Attribute
+  // Add Custom Rider Attribute
   const handleAddCustomAttribute = () => {
     if (!newAttributeInput.trim()) return;
     setCustomAttributes([...customAttributes, newAttributeInput.trim()]);
     setNewAttributeInput("");
   };
 
-  // Add Variant (Carries forward options from parent/base)
+  // Add Variant
   const handleAddVariant = () => {
     if (!varName.trim()) {
       alert("Please enter a variant name (e.g. JBL VRX or RCF TT+)");
+      return;
+    }
+    if (!varPrice || varPrice <= 0) {
+      alert("Please enter a valid price for this variant.");
       return;
     }
 
     const newVariant: Variant = {
       id: Date.now().toString(),
       name: varName.trim(),
-      price: Number(varPrice) || price,
-      pricingUnit: varUnit || pricingUnit,
-      customUnit: varCustomUnit || customUnit,
-      notes: varNotes.trim() || writtenNotes,
-      travelCostAdditional: varTravel,
-      foodCostAdditional: varFood,
-      roomsRequired: varRooms,
-      roomsCount: varRoomsCount,
-      customAttributes: [...customAttributes],
+      price: Number(varPrice),
+      pricingUnit: varUnit,
+      customUnit: varCustomUnit,
+      notes: varNotes.trim(),
     };
 
     setVariants([...variants, newVariant]);
     setVarName("");
-    setVarPrice(price);
+    setVarPrice(0);
     setVarNotes("");
-  };
-
-  // When opening modal, prefill variant helper with current base values
-  const initVariantFormWithBase = () => {
-    setVarPrice(price);
-    setVarUnit(pricingUnit);
-    setVarCustomUnit(customUnit);
-    setVarTravel(travelCostAdditional);
-    setVarFood(foodCostAdditional);
-    setVarRooms(roomsRequired);
-    setVarRoomsCount(roomsCount);
   };
 
   // Reset form
@@ -220,16 +202,20 @@ export default function EntertainmentPage() {
     setCategory("Sound & Audio");
     setIsCustomCategory(false);
     setCustomCategoryInput("");
+    setHasVariants(false);
     setPrice(0);
     setPricingUnit("Per Event");
     setCustomUnit("");
+    setVariants([]);
+    setVarName("");
+    setVarPrice(0);
+    setVarNotes("");
     setWrittenNotes("");
     setTravelCostAdditional(false);
     setFoodCostAdditional(false);
     setRoomsRequired(false);
     setRoomsCount(1);
     setCustomAttributes([]);
-    setVariants([]);
     setImageFiles([]);
     setExistingImages([]);
     setVideoFile(null);
@@ -251,16 +237,27 @@ export default function EntertainmentPage() {
     setName(item.name || "");
     setCategory(item.category || "Sound & Audio");
     setIsCustomCategory(false);
-    setPrice(item.price || 0);
-    setPricingUnit(item.pricingUnit || "Per Event");
-    setCustomUnit(item.customUnit || "");
+    
+    // Check if item has variants
+    const itemHasVariants = item.hasVariants || (item.variants && item.variants.length > 0);
+    setHasVariants(itemHasVariants);
+
+    if (itemHasVariants) {
+      setPrice(0); // Blank base price
+      setVariants(item.variants || []);
+    } else {
+      setPrice(item.price || 0);
+      setPricingUnit(item.pricingUnit || "Per Event");
+      setCustomUnit(item.customUnit || "");
+      setVariants([]);
+    }
+
     setWrittenNotes(item.writtenNotes || "");
     setTravelCostAdditional(item.attributes?.travelCostAdditional || false);
     setFoodCostAdditional(item.attributes?.foodCostAdditional || false);
     setRoomsRequired(item.attributes?.roomsRequired || false);
     setRoomsCount(item.attributes?.roomsCount || 1);
     setCustomAttributes(item.attributes?.customAttributes || []);
-    setVariants(item.variants || []);
     setExistingImages(item.images || []);
     setImageFiles([]);
     setExistingVideoUrl(item.videoUrl || "");
@@ -283,6 +280,13 @@ export default function EntertainmentPage() {
   // Save Item
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validation
+    if (hasVariants && variants.length === 0) {
+      alert("You selected 'Multiple Variants', but haven't added any variant yet. Please add at least one variant (e.g. JBL or RCF) or switch to 'Single Price'.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -313,12 +317,15 @@ export default function EntertainmentPage() {
         finalAudioUrl = await getDownloadURL(audioRef);
       }
 
+      // Base Price is strictly 0 / ignored if hasVariants is true
       const itemData = {
         name,
         category: finalCategory,
-        price: Number(price) || 0,
-        pricingUnit,
-        customUnit,
+        hasVariants,
+        price: hasVariants ? 0 : Number(price) || 0,
+        pricingUnit: hasVariants ? "" : pricingUnit,
+        customUnit: hasVariants ? "" : customUnit,
+        variants: hasVariants ? variants : [],
         writtenNotes,
         attributes: {
           travelCostAdditional,
@@ -327,7 +334,6 @@ export default function EntertainmentPage() {
           roomsCount: Number(roomsCount) || 1,
           customAttributes,
         },
-        variants,
         images: uploadedImageUrls,
         videoUrl: finalVideoUrl,
         audioUrl: finalAudioUrl,
@@ -364,7 +370,7 @@ export default function EntertainmentPage() {
           <div>
             <h1 className="text-3xl font-black text-gray-900">Entertainment, Sound & SFX Library</h1>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Manage non-decor items: Audio gear, Anchors, Color bombs, SFX, Live Stalls & Artists with rider requirements.
+              Manage non-decor items: Audio gear, Anchors, Color bombs, SFX, Live Stalls & Artists.
             </p>
           </div>
           {role !== "sales" && (
@@ -379,130 +385,149 @@ export default function EntertainmentPage() {
 
         {/* Grid Display */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="bg-white border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between"
-            >
-              <div>
-                {/* Image */}
-                <div className="h-52 bg-gray-200 relative overflow-hidden">
-                  {item.images && item.images.length > 0 ? (
-                    <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500 font-bold">No Photos</div>
-                  )}
-                  <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded shadow">
-                    ₹{item.price?.toLocaleString()} / {item.pricingUnit === "Custom Unit" ? item.customUnit : item.pricingUnit}
-                  </span>
-                  {item.images?.length > 1 && (
-                    <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs font-bold px-2 py-0.5 rounded">
-                      +{item.images.length - 1} more photos
-                    </span>
-                  )}
-                </div>
+          {items.map((item) => {
+            const hasItemVariants = item.hasVariants && item.variants?.length > 0;
+            const minPrice = hasItemVariants 
+              ? Math.min(...item.variants.map((v: Variant) => v.price)) 
+              : item.price;
 
-                <div className="p-4 space-y-3">
-                  <span className="bg-slate-100 text-slate-800 text-xs font-black px-2.5 py-1 rounded border border-slate-300 uppercase">
-                    {item.category}
-                  </span>
+            return (
+              <div
+                key={item.id}
+                className="bg-white border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between"
+              >
+                <div>
+                  {/* Image */}
+                  <div className="h-52 bg-gray-200 relative overflow-hidden">
+                    {item.images && item.images.length > 0 ? (
+                      <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-500 font-bold">No Photos</div>
+                    )}
 
-                  <h3 className="font-black text-xl text-gray-900 leading-snug">{item.name}</h3>
-
-                  {/* Rider Badges */}
-                  <div className="flex flex-wrap gap-1.5 text-xs font-bold">
-                    {item.attributes?.travelCostAdditional && (
-                      <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded border border-amber-300">
-                        ✈️ Travel Extra
+                    {/* Price Badge: Changes cleanly depending on variants vs single price */}
+                    {hasItemVariants ? (
+                      <span className="absolute top-2 right-2 bg-purple-700 text-white text-xs font-black px-2.5 py-1 rounded shadow">
+                        From ₹{minPrice.toLocaleString()} ({item.variants.length} Options)
+                      </span>
+                    ) : (
+                      <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded shadow">
+                        ₹{item.price?.toLocaleString()} / {item.pricingUnit === "Custom Unit" ? item.customUnit : item.pricingUnit}
                       </span>
                     )}
-                    {item.attributes?.foodCostAdditional && (
-                      <span className="bg-orange-100 text-orange-900 px-2 py-0.5 rounded border border-orange-300">
-                        🍽️ Food Extra
+
+                    {item.images?.length > 1 && (
+                      <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs font-bold px-2 py-0.5 rounded">
+                        +{item.images.length - 1} more photos
                       </span>
                     )}
-                    {item.attributes?.roomsRequired && (
-                      <span className="bg-blue-100 text-blue-900 px-2 py-0.5 rounded border border-blue-300">
-                        🏨 {item.attributes?.roomsCount || 1} Room(s) Required
-                      </span>
-                    )}
-                    {item.attributes?.customAttributes?.map((attr: string, idx: number) => (
-                      <span key={idx} className="bg-gray-100 text-gray-800 px-2 py-0.5 rounded border border-gray-300">
-                        ⭐ {attr}
-                      </span>
-                    ))}
                   </div>
 
-                  {/* Written Notes */}
-                  {item.writtenNotes && (
-                    <p className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
-                      <strong>Notes:</strong> {item.writtenNotes}
-                    </p>
-                  )}
+                  <div className="p-4 space-y-3">
+                    <span className="bg-slate-100 text-slate-800 text-xs font-black px-2.5 py-1 rounded border border-slate-300 uppercase">
+                      {item.category}
+                    </span>
 
-                  {/* Variants Section */}
-                  {item.variants && item.variants.length > 0 && (
-                    <div className="bg-slate-50 border border-slate-300 p-2.5 rounded-lg space-y-1.5">
-                      <p className="text-xs font-black text-gray-900 uppercase">
-                        Available Variants / Brands ({item.variants.length}):
+                    <h3 className="font-black text-xl text-gray-900 leading-snug">{item.name}</h3>
+
+                    {/* Rider Badges */}
+                    <div className="flex flex-wrap gap-1.5 text-xs font-bold">
+                      {item.attributes?.travelCostAdditional && (
+                        <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded border border-amber-300">
+                          ✈️ Travel Extra
+                        </span>
+                      )}
+                      {item.attributes?.foodCostAdditional && (
+                        <span className="bg-orange-100 text-orange-900 px-2 py-0.5 rounded border border-orange-300">
+                          🍽️ Food Extra
+                        </span>
+                      )}
+                      {item.attributes?.roomsRequired && (
+                        <span className="bg-blue-100 text-blue-900 px-2 py-0.5 rounded border border-blue-300">
+                          🏨 {item.attributes?.roomsCount || 1} Room(s) Required
+                        </span>
+                      )}
+                      {item.attributes?.customAttributes?.map((attr: string, idx: number) => (
+                        <span key={idx} className="bg-gray-100 text-gray-800 px-2 py-0.5 rounded border border-gray-300">
+                          ⭐ {attr}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Written Notes */}
+                    {item.writtenNotes && (
+                      <p className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
+                        <strong>Notes:</strong> {item.writtenNotes}
                       </p>
-                      <div className="space-y-1">
-                        {item.variants.map((v: Variant) => (
-                          <div key={v.id} className="text-xs flex justify-between items-center bg-white p-1.5 rounded border">
-                            <span className="font-bold text-gray-800">{v.name}</span>
-                            <span className="font-black text-blue-700">
-                              ₹{v.price.toLocaleString()} / {v.pricingUnit === "Custom Unit" ? v.customUnit : v.pricingUnit}
-                            </span>
-                          </div>
-                        ))}
+                    )}
+
+                    {/* Variants List (If Multiple Variants) */}
+                    {hasItemVariants && (
+                      <div className="bg-purple-50/70 border-2 border-purple-200 p-2.5 rounded-lg space-y-1.5">
+                        <p className="text-xs font-black text-purple-950 uppercase">
+                          Available Brands / Options ({item.variants.length}):
+                        </p>
+                        <div className="space-y-1">
+                          {item.variants.map((v: Variant) => (
+                            <div key={v.id} className="text-xs flex justify-between items-center bg-white p-2 rounded border border-purple-100">
+                              <div>
+                                <span className="font-bold text-gray-900">{v.name}</span>
+                                {v.notes && <p className="text-[10px] text-gray-500 italic">{v.notes}</p>}
+                              </div>
+                              <span className="font-black text-purple-700 ml-2">
+                                ₹{v.price.toLocaleString()} / {v.pricingUnit === "Custom Unit" ? v.customUnit : v.pricingUnit}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Audio Instruction */}
-                  {item.audioUrl && (
-                    <div className="bg-purple-50 border border-purple-200 p-2 rounded-lg">
-                      <p className="text-xs font-black text-purple-900 mb-1">🎙️ Audio Note:</p>
-                      <audio controls src={item.audioUrl} className="w-full h-8" />
-                    </div>
-                  )}
+                    {/* Audio Instruction */}
+                    {item.audioUrl && (
+                      <div className="bg-purple-50 border border-purple-200 p-2 rounded-lg">
+                        <p className="text-xs font-black text-purple-900 mb-1">🎙️ Audio Note:</p>
+                        <audio controls src={item.audioUrl} className="w-full h-8" />
+                      </div>
+                    )}
 
-                  {/* Video Walkthrough (Max 20MB) */}
-                  {item.videoUrl && (
-                    <div className="bg-blue-50 border border-blue-200 p-2 rounded-lg">
-                      <p className="text-xs font-black text-blue-900 mb-1">📹 Video Preview:</p>
-                      <video controls src={item.videoUrl} className="w-full rounded h-36 bg-black" />
-                    </div>
-                  )}
+                    {/* Video Walkthrough */}
+                    {item.videoUrl && (
+                      <div className="bg-blue-50 border border-blue-200 p-2 rounded-lg">
+                        <p className="text-xs font-black text-blue-900 mb-1">📹 Video Preview:</p>
+                        <video controls src={item.videoUrl} className="w-full rounded h-36 bg-black" />
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                {/* Action Buttons */}
+                {role !== "sales" && (
+                  <div className="p-4 border-t border-gray-200 grid grid-cols-2 gap-2 bg-gray-50">
+                    <button
+                      onClick={() => openEditModal(item)}
+                      className="w-full bg-white border-2 border-gray-300 hover:bg-gray-100 text-gray-900 font-bold py-2 rounded text-sm transition"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(item.id, item.name)}
+                      className="w-full bg-red-50 border-2 border-red-300 hover:bg-red-100 text-red-700 font-bold py-2 rounded text-sm transition"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
-
-              {/* Action Buttons */}
-              {role !== "sales" && (
-                <div className="p-4 border-t border-gray-200 grid grid-cols-2 gap-2 bg-gray-50">
-                  <button
-                    onClick={() => openEditModal(item)}
-                    className="w-full bg-white border-2 border-gray-300 hover:bg-gray-100 text-gray-900 font-bold py-2 rounded text-sm transition"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(item.id, item.name)}
-                    className="w-full bg-red-50 border-2 border-red-300 hover:bg-red-100 text-red-700 font-bold py-2 rounded text-sm transition"
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {items.length === 0 && (
           <div className="text-center py-16 bg-white border-2 border-dashed border-gray-300 rounded-xl">
             <p className="text-gray-600 font-bold text-lg">No entertainment or SFX items created yet.</p>
             <p className="text-gray-400 text-sm mt-1">
-              Click "+ Add Entertainment Item" to add sound setups, anchors, fireworks, color bombs, or live stalls.
+              Click "+ Add Entertainment Item" to add sound setups, anchors, fireworks, or live stalls.
             </p>
           </div>
         )}
@@ -524,7 +549,7 @@ export default function EntertainmentPage() {
               </div>
 
               <form onSubmit={handleSave} className="space-y-6">
-                {/* 1. General Details */}
+                {/* 1. Item Details */}
                 <div className="space-y-4">
                   <h3 className="font-black text-blue-700 text-sm tracking-wide uppercase border-b pb-1">
                     1. Item & Service Details
@@ -577,57 +602,188 @@ export default function EntertainmentPage() {
                       </div>
                     )}
                   </div>
-
-                  {/* Pricing & Units */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-blue-50/50 p-3.5 rounded-xl border-2 border-blue-200">
-                    <div>
-                      <label className="block text-xs font-black text-gray-800 mb-1">Base Price (₹) *</label>
-                      <input
-                        type="number"
-                        min="0"
-                        required
-                        placeholder="25000"
-                        value={price}
-                        onChange={(e) => setPrice(Number(e.target.value))}
-                        className="w-full border-2 border-gray-400 bg-white p-2 rounded-lg font-bold text-gray-900"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-black text-gray-800 mb-1">Pricing Unit *</label>
-                      <select
-                        value={pricingUnit}
-                        onChange={(e) => setPricingUnit(e.target.value)}
-                        className="w-full border-2 border-gray-400 bg-white p-2 rounded-lg font-bold text-gray-900"
-                      >
-                        <option value="Per Event">Per Event</option>
-                        <option value="Per Day">Per Day</option>
-                        <option value="Per Pc">Per Pc</option>
-                        <option value="Per Person">Per Person</option>
-                        <option value="Per Wedding">Per Wedding</option>
-                        <option value="Custom Unit">Custom Unit...</option>
-                      </select>
-                    </div>
-
-                    {pricingUnit === "Custom Unit" && (
-                      <div>
-                        <label className="block text-xs font-black text-blue-900 mb-1">Specify Unit *</label>
-                        <input
-                          required
-                          placeholder="e.g. Per 50 Shots, Per Hour"
-                          value={customUnit}
-                          onChange={(e) => setCustomUnit(e.target.value)}
-                          className="w-full border-2 border-blue-400 bg-white p-2 rounded-lg font-bold text-gray-900"
-                        />
-                      </div>
-                    )}
-                  </div>
                 </div>
 
-                {/* 2. Riders & Attributes */}
+                {/* 2. Pricing Setup: Either Single Price OR Multiple Variants */}
+                <div className="space-y-4 border-2 border-blue-300 bg-blue-50/30 p-4 rounded-xl">
+                  <h3 className="font-black text-blue-900 text-sm tracking-wide uppercase">
+                    2. Pricing Structure
+                  </h3>
+
+                  {/* Mode Selector */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHasVariants(false);
+                        setVariants([]); // Clear variants
+                      }}
+                      className={`p-3 rounded-lg border-2 text-left transition ${
+                        !hasVariants
+                          ? "bg-blue-600 text-white border-blue-700 font-black shadow"
+                          : "bg-white text-gray-700 border-gray-300 font-bold hover:bg-gray-100"
+                      }`}
+                    >
+                      <span className="block text-sm">💰 Single / Fixed Price</span>
+                      <span className="block text-xs opacity-80 mt-0.5">
+                        One price for all (e.g. Color Bomb, Anchor)
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHasVariants(true);
+                        setPrice(0); // Blank out single base price
+                      }}
+                      className={`p-3 rounded-lg border-2 text-left transition ${
+                        hasVariants
+                          ? "bg-purple-700 text-white border-purple-800 font-black shadow"
+                          : "bg-white text-gray-700 border-gray-300 font-bold hover:bg-gray-100"
+                      }`}
+                    >
+                      <span className="block text-sm">🔀 Multiple Variants / Brands</span>
+                      <span className="block text-xs opacity-80 mt-0.5">
+                        Different options & prices (e.g. JBL vs RCF)
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Case A: Single Price inputs */}
+                  {!hasVariants && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-3.5 rounded-lg border-2 border-blue-200">
+                      <div>
+                        <label className="block text-xs font-black text-gray-800 mb-1">Fixed Price (₹) *</label>
+                        <input
+                          type="number"
+                          min="0"
+                          required
+                          placeholder="25000"
+                          value={price || ""}
+                          onChange={(e) => setPrice(Number(e.target.value))}
+                          className="w-full border-2 border-gray-400 bg-white p-2 rounded-lg font-bold text-gray-900"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-black text-gray-800 mb-1">Pricing Unit *</label>
+                        <div className="flex gap-2">
+                          <select
+                            value={pricingUnit}
+                            onChange={(e) => setPricingUnit(e.target.value)}
+                            className="w-full border-2 border-gray-400 bg-white p-2 rounded-lg font-bold text-gray-900"
+                          >
+                            <option value="Per Event">Per Event</option>
+                            <option value="Per Day">Per Day</option>
+                            <option value="Per Pc">Per Pc</option>
+                            <option value="Per Person">Per Person</option>
+                            <option value="Per Wedding">Per Wedding</option>
+                            <option value="Custom Unit">Custom Unit...</option>
+                          </select>
+
+                          {pricingUnit === "Custom Unit" && (
+                            <input
+                              required
+                              placeholder="e.g. Per 50 Shots"
+                              value={customUnit}
+                              onChange={(e) => setCustomUnit(e.target.value)}
+                              className="w-full border-2 border-blue-400 bg-white p-2 rounded-lg font-bold text-gray-900"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Case B: Multiple Variants builder (Base price is completely blanked and hidden!) */}
+                  {hasVariants && (
+                    <div className="space-y-3 bg-purple-50 p-4 rounded-xl border-2 border-purple-300">
+                      <p className="text-xs font-black text-purple-950 uppercase">
+                        Add Available Brands or Options (Each with its own price):
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white p-3 rounded-lg border">
+                        <div className="md:col-span-4">
+                          <label className="block text-xs font-bold text-gray-700">Variant / Brand Name *</label>
+                          <input
+                            placeholder="e.g. JBL VRX System"
+                            value={varName}
+                            onChange={(e) => setVarName(e.target.value)}
+                            className="w-full border p-1.5 rounded font-bold text-xs"
+                          />
+                        </div>
+
+                        <div className="md:col-span-3">
+                          <label className="block text-xs font-bold text-gray-700">Price (₹) *</label>
+                          <input
+                            type="number"
+                            placeholder="45000"
+                            value={varPrice || ""}
+                            onChange={(e) => setVarPrice(Number(e.target.value))}
+                            className="w-full border p-1.5 rounded font-bold text-xs"
+                          />
+                        </div>
+
+                        <div className="md:col-span-3">
+                          <label className="block text-xs font-bold text-gray-700">Unit</label>
+                          <select
+                            value={varUnit}
+                            onChange={(e) => setVarUnit(e.target.value)}
+                            className="w-full border p-1.5 rounded font-bold text-xs"
+                          >
+                            <option value="Per Event">Per Event</option>
+                            <option value="Per Day">Per Day</option>
+                            <option value="Per Pc">Per Pc</option>
+                            <option value="Per Person">Per Person</option>
+                            <option value="Per Wedding">Per Wedding</option>
+                          </select>
+                        </div>
+
+                        <div className="md:col-span-2 flex items-end">
+                          <button
+                            type="button"
+                            onClick={handleAddVariant}
+                            className="w-full bg-purple-700 hover:bg-purple-800 text-white font-black p-1.5 rounded text-xs"
+                          >
+                            + Add Option
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Variants Added */}
+                      {variants.length > 0 ? (
+                        <div className="space-y-1.5 mt-2">
+                          {variants.map((v, idx) => (
+                            <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded border text-xs">
+                              <div>
+                                <span className="font-bold text-purple-950 text-sm">🔀 {v.name}</span>
+                                <span className="ml-3 font-black text-blue-700">
+                                  ₹{v.price.toLocaleString()} / {v.pricingUnit}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setVariants(variants.filter((_, i) => i !== idx))}
+                                className="text-red-600 font-bold hover:underline"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-800 bg-amber-100 p-2 rounded font-bold">
+                          ⚠️ Please add at least one variant option above (e.g. JBL VRX or RCF TT+).
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Riders & Attributes */}
                 <div className="space-y-3 bg-amber-50/50 p-4 rounded-xl border-2 border-amber-300">
                   <h3 className="font-black text-amber-900 text-sm tracking-wide uppercase">
-                    2. Attributes & Rider Requirements
+                    3. Attributes & Rider Requirements
                   </h3>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -717,100 +873,6 @@ export default function EntertainmentPage() {
                   </div>
                 </div>
 
-                {/* 3. Variants (e.g. JBL vs RCF, Male vs Female) */}
-                <div className="space-y-3 bg-purple-50/50 p-4 rounded-xl border-2 border-purple-300">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="font-black text-purple-900 text-sm tracking-wide uppercase">
-                        3. Variants (e.g. JBL vs RCF, Female vs Male Anchor)
-                      </h3>
-                      <p className="text-xs text-purple-700">
-                        Variants automatically inherit the parent item settings above.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={initVariantFormWithBase}
-                      className="text-xs font-bold text-purple-800 underline"
-                    >
-                      Copy Parent Values
-                    </button>
-                  </div>
-
-                  {/* Add Variant Form */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white p-3 rounded-lg border">
-                    <div className="md:col-span-4">
-                      <label className="block text-xs font-bold text-gray-700">Variant Name *</label>
-                      <input
-                        placeholder="e.g. JBL VRX System (Up to 300 pax)"
-                        value={varName}
-                        onChange={(e) => setVarName(e.target.value)}
-                        className="w-full border p-1.5 rounded font-bold text-xs"
-                      />
-                    </div>
-
-                    <div className="md:col-span-3">
-                      <label className="block text-xs font-bold text-gray-700">Price (₹)</label>
-                      <input
-                        type="number"
-                        placeholder="Price"
-                        value={varPrice || ""}
-                        onChange={(e) => setVarPrice(Number(e.target.value))}
-                        className="w-full border p-1.5 rounded font-bold text-xs"
-                      />
-                    </div>
-
-                    <div className="md:col-span-3">
-                      <label className="block text-xs font-bold text-gray-700">Unit</label>
-                      <select
-                        value={varUnit}
-                        onChange={(e) => setVarUnit(e.target.value)}
-                        className="w-full border p-1.5 rounded font-bold text-xs"
-                      >
-                        <option value="Per Event">Per Event</option>
-                        <option value="Per Day">Per Day</option>
-                        <option value="Per Pc">Per Pc</option>
-                        <option value="Per Person">Per Person</option>
-                        <option value="Per Wedding">Per Wedding</option>
-                        <option value="Custom Unit">Custom Unit...</option>
-                      </select>
-                    </div>
-
-                    <div className="md:col-span-2 flex items-end">
-                      <button
-                        type="button"
-                        onClick={handleAddVariant}
-                        className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold p-1.5 rounded text-xs"
-                      >
-                        + Add Variant
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Added Variants List */}
-                  {variants.length > 0 && (
-                    <div className="space-y-1.5 mt-2">
-                      {variants.map((v, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded border text-xs">
-                          <div>
-                            <span className="font-bold text-purple-950 text-sm">{v.name}</span>
-                            <span className="ml-2 font-black text-blue-700">
-                              ₹{v.price.toLocaleString()} / {v.pricingUnit === "Custom Unit" ? v.customUnit : v.pricingUnit}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setVariants(variants.filter((_, i) => i !== idx))}
-                            className="text-red-600 font-bold hover:underline"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
                 {/* 4. Written Notes */}
                 <div>
                   <label className="block text-sm font-black text-gray-800 mb-1">
@@ -825,7 +887,7 @@ export default function EntertainmentPage() {
                   />
                 </div>
 
-                {/* 5. Media (Images, 20MB Video, Audio) */}
+                {/* 5. Media Attachments */}
                 <div className="space-y-3 bg-slate-50 p-4 rounded-xl border-2 border-slate-300">
                   <h3 className="font-black text-gray-800 text-sm tracking-wide uppercase">
                     4. Media Attachments (Optional)
