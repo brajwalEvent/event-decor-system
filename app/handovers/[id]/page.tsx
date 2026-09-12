@@ -19,39 +19,36 @@ export default function HandoverWorkspace() {
   const params = useParams();
   const router = useRouter();
   const handoverId = params.id as string;
-  const { user, role, loading } = useAuth();
+  const { user, role, isSuperAdmin, loading } = useAuth();
 
   const [handover, setHandover] = useState<any>(null);
   const [componentsLibrary, setComponentsLibrary] = useState<any[]>([]);
   const [entertainmentLibrary, setEntertainmentLibrary] = useState<any[]>([]);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
+  const [commentTaggedItem, setCommentTaggedItem] = useState("");
 
-  // Tab: "scope" | "discussion"
-  const [activeTab, setActiveTab] = useState<"scope" | "discussion">("scope");
+  // Tabs: "scope" | "discussion" | "audit"
+  const [activeTab, setActiveTab] = useState<"scope" | "discussion" | "audit">("scope");
 
-  // Selected Day & Event indices
+  // Selection
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
   const [selectedEventIndex, setSelectedEventIndex] = useState<number>(0);
-
-  // Scope Tab: "decor" | "entertainment"
   const [eventScopeTab, setEventScopeTab] = useState<"decor" | "entertainment">("decor");
 
-  // Add Day State
+  // Day & Event Add States
   const [newDayName, setNewDayName] = useState("Day One");
-
-  // Add Event State (with Custom Event support)
   const [newEventName, setNewEventName] = useState("Haldi");
   const [isCustomEventName, setIsCustomEventName] = useState(false);
   const [customEventInput, setCustomEventInput] = useState("");
   const [newEventLocation, setNewEventLocation] = useState("");
   const [newEventReadyTime, setNewEventReadyTime] = useState("");
 
-  // Color Theme state
+  // Color Theme
   const [colorHex, setColorHex] = useState("#FFD700");
   const [colorRole, setColorRole] = useState("Major Drapery");
 
-  // Add Component state
+  // Decor Component Add State
   const [selectedCompId, setSelectedCompId] = useState("");
   const [compCustomSize, setCompCustomSize] = useState("");
   const [compColorVariation, setCompColorVariation] = useState("");
@@ -62,16 +59,23 @@ export default function HandoverWorkspace() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // Add Entertainment state
+  // Entertainment Add State
   const [selectedEntId, setSelectedEntId] = useState("");
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [entNotes, setEntNotes] = useState("");
+
+  // Production Remark Modal / Input State
+  const [editingRemarkItem, setEditingRemarkItem] = useState<{ type: 'decor' | 'ent', index: number, currentRemark: string } | null>(null);
+  const [remarkText, setRemarkText] = useState("");
+
+  const isProductionOrAdmin = isSuperAdmin || role === "production" || role === "admin";
+  const isSales = role === "sales";
 
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Fetch Handover & Master Libraries
+  // Fetch Handover & Libraries
   const fetchHandoverAndMasterData = async () => {
     try {
       const hSnap = await getDoc(doc(db, "handovers", handoverId));
@@ -79,14 +83,12 @@ export default function HandoverWorkspace() {
         setHandover(hSnap.data());
       }
 
-      // Components
       const compsSnap = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
         const snap = await getDocs(collection(db, "components"));
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       });
       setComponentsLibrary(compsSnap);
 
-      // Entertainment
       const entsSnap = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
         const snap = await getDocs(collection(db, "entertainment"));
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -101,7 +103,7 @@ export default function HandoverWorkspace() {
     if (handoverId) fetchHandoverAndMasterData();
   }, [handoverId]);
 
-  // Comments Stream
+  // Comments Listener
   useEffect(() => {
     if (!handoverId) return;
     const q = query(
@@ -114,54 +116,84 @@ export default function HandoverWorkspace() {
     return () => unsubscribe();
   }, [handoverId]);
 
-  // Save to Firebase Helper
-  const updateHandoverDaysInDb = async (updatedDays: any[]) => {
+  // Audit Logger: Saves modification with who, when, and remark
+  const logModification = async (action: string, remark: string) => {
+    const logEntry = {
+      author: user?.email || "User",
+      role: role || "sales",
+      action,
+      remark: remark || "Updated scope details",
+      timestamp: new Date().toISOString(),
+    };
+
+    const currentLogs = handover.auditLogs || [];
+    const updatedLogs = [logEntry, ...currentLogs];
+
+    await updateDoc(doc(db, "handovers", handoverId), {
+      auditLogs: updatedLogs,
+      updatedAt: new Date().toISOString(),
+    });
+
+    setHandover((prev: any) => ({ ...prev, auditLogs: updatedLogs }));
+  };
+
+  // Save Handover Days to Database
+  const updateHandoverDaysInDb = async (updatedDays: any[], actionText?: string) => {
     try {
       await updateDoc(doc(db, "handovers", handoverId), {
         days: updatedDays,
         updatedAt: new Date().toISOString(),
       });
       setHandover((prev: any) => ({ ...prev, days: updatedDays }));
+
+      // Prompt modification remark if handover is already submitted or in production
+      if (handover.status !== "Draft" && actionText) {
+        const userRemark = prompt(`Audit Log: Please enter a brief remark for this change (${actionText}):`) || "Scope adjustment";
+        await logModification(actionText, userRemark);
+      }
     } catch (err) {
       console.error("Save error:", err);
       alert("Failed to save changes.");
     }
   };
 
-  // 1. ADD DAY
+  // Helper: Get list of all components and items for tagging in discussion
+  const getAllTaggableItems = () => {
+    const list: string[] = [];
+    handover?.days?.forEach((day: any) => {
+      day.events?.forEach((ev: any) => {
+        ev.decorComponents?.forEach((dc: any) => {
+          list.push(`${day.dayName} > ${ev.eventName} > [Decor: ${dc.name}]`);
+        });
+        ev.entertainmentElements?.forEach((ee: any) => {
+          list.push(`${day.dayName} > ${ev.eventName} > [SFX: ${ee.name}]`);
+        });
+      });
+    });
+    return list;
+  };
+
+  // Add / Delete Days
   const handleAddDay = async () => {
     const updatedDays = [...(handover.days || [])];
-    updatedDays.push({
-      dayName: newDayName,
-      events: [],
-    });
-    await updateHandoverDaysInDb(updatedDays);
+    updatedDays.push({ dayName: newDayName, events: [] });
+    await updateHandoverDaysInDb(updatedDays, `Added ${newDayName}`);
     setSelectedDayIndex(updatedDays.length - 1);
   };
 
-  // 2. DELETE DAY
   const handleDeleteDay = async (dayIndex: number) => {
-    const dayToDelete = handover.days[dayIndex];
-    if (!window.confirm(`Are you sure you want to delete "${dayToDelete.dayName}" and all its events?`)) return;
-
+    const dayName = handover.days[dayIndex].dayName;
+    if (!window.confirm(`Delete "${dayName}" and all its events?`)) return;
     const updatedDays = handover.days.filter((_: any, idx: number) => idx !== dayIndex);
-    await updateHandoverDaysInDb(updatedDays);
+    await updateHandoverDaysInDb(updatedDays, `Deleted ${dayName}`);
     setSelectedDayIndex(0);
     setSelectedEventIndex(0);
   };
 
-  // 3. ADD SUB-EVENT (Supports Custom Names)
+  // Add / Delete Events
   const handleAddEvent = async () => {
-    if (!handover.days || handover.days.length === 0) {
-      alert("Please add a Day first.");
-      return;
-    }
-
     const finalEventName = isCustomEventName ? customEventInput.trim() : newEventName;
-    if (!finalEventName) {
-      alert("Please specify an event name.");
-      return;
-    }
+    if (!finalEventName) return;
 
     const updatedDays = [...handover.days];
     const targetDay = updatedDays[selectedDayIndex];
@@ -175,7 +207,7 @@ export default function HandoverWorkspace() {
       entertainmentElements: [],
     });
 
-    await updateHandoverDaysInDb(updatedDays);
+    await updateHandoverDaysInDb(updatedDays, `Added Event ${finalEventName} in ${targetDay.dayName}`);
     setSelectedEventIndex(targetDay.events.length - 1);
     setNewEventLocation("");
     setNewEventReadyTime("");
@@ -183,32 +215,28 @@ export default function HandoverWorkspace() {
     setCustomEventInput("");
   };
 
-  // 4. DELETE SUB-EVENT
   const handleDeleteEvent = async (eventIndex: number) => {
     const eventName = handover.days[selectedDayIndex].events[eventIndex].eventName;
-    if (!window.confirm(`Delete the event "${eventName}"?`)) return;
-
+    if (!window.confirm(`Delete "${eventName}"?`)) return;
     const updatedDays = [...handover.days];
     updatedDays[selectedDayIndex].events.splice(eventIndex, 1);
-    await updateHandoverDaysInDb(updatedDays);
+    await updateHandoverDaysInDb(updatedDays, `Deleted Event ${eventName}`);
     setSelectedEventIndex(0);
   };
 
-  // 5. ADD COLOR THEME
+  // Color Themes
   const handleAddColorTheme = async () => {
     const updatedDays = [...handover.days];
     const currentEvent = updatedDays[selectedDayIndex]?.events[selectedEventIndex];
     if (!currentEvent) return;
-
     if (!currentEvent.colorThemes) currentEvent.colorThemes = [];
     currentEvent.colorThemes.push({ hex: colorHex, role: colorRole });
     await updateHandoverDaysInDb(updatedDays);
   };
 
-  // 6. DELETE COLOR THEME
-  const handleDeleteColorTheme = async (colorIdx: number) => {
+  const handleDeleteColorTheme = async (idx: number) => {
     const updatedDays = [...handover.days];
-    updatedDays[selectedDayIndex].events[selectedEventIndex].colorThemes.splice(colorIdx, 1);
+    updatedDays[selectedDayIndex].events[selectedEventIndex].colorThemes.splice(idx, 1);
     await updateHandoverDaysInDb(updatedDays);
   };
 
@@ -219,17 +247,14 @@ export default function HandoverWorkspace() {
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
-
       mediaRecorder.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         setCompAudioFile(blob);
         stream.getTracks().forEach((track) => track.stop());
       };
-
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
@@ -244,7 +269,7 @@ export default function HandoverWorkspace() {
     }
   };
 
-  // 7. ADD DECOR COMPONENT
+  // Add Decor Component
   const handleAddDecorComponent = async () => {
     if (!selectedCompId) return;
     const master = componentsLibrary.find((c) => c.id === selectedCompId);
@@ -270,11 +295,11 @@ export default function HandoverWorkspace() {
       colorVariation: compColorVariation,
       placement: compPlacement,
       clientChanges: compClientChanges,
+      productionRemarks: "", // For backend team remarks
       audioUrl,
     });
 
-    await updateHandoverDaysInDb(updatedDays);
-
+    await updateHandoverDaysInDb(updatedDays, `Added Component: ${master.name}`);
     setSelectedCompId("");
     setCompCustomSize("");
     setCompColorVariation("");
@@ -283,15 +308,15 @@ export default function HandoverWorkspace() {
     setCompAudioFile(null);
   };
 
-  // 8. DELETE DECOR COMPONENT
   const handleDeleteDecorComponent = async (compIdx: number) => {
-    if (!window.confirm("Remove this component from the event scope?")) return;
+    const compName = handover.days[selectedDayIndex].events[selectedEventIndex].decorComponents[compIdx].name;
+    if (!window.confirm(`Remove "${compName}" from this event?`)) return;
     const updatedDays = [...handover.days];
     updatedDays[selectedDayIndex].events[selectedEventIndex].decorComponents.splice(compIdx, 1);
-    await updateHandoverDaysInDb(updatedDays);
+    await updateHandoverDaysInDb(updatedDays, `Removed Component: ${compName}`);
   };
 
-  // 9. ADD ENTERTAINMENT
+  // Add Entertainment
   const handleAddEntertainment = async () => {
     if (!selectedEntId) return;
     const master = entertainmentLibrary.find((e) => e.id === selectedEntId);
@@ -322,70 +347,119 @@ export default function HandoverWorkspace() {
       price: finalPrice,
       pricingUnit: finalUnit,
       notes: entNotes,
+      productionRemarks: "",
     });
 
-    await updateHandoverDaysInDb(updatedDays);
+    await updateHandoverDaysInDb(updatedDays, `Added Entertainment: ${master.name}`);
     setSelectedEntId("");
     setSelectedVariantId("");
     setEntNotes("");
   };
 
-  // 10. DELETE ENTERTAINMENT
   const handleDeleteEntertainment = async (entIdx: number) => {
-    if (!window.confirm("Remove this item?")) return;
+    const entName = handover.days[selectedDayIndex].events[selectedEventIndex].entertainmentElements[entIdx].name;
+    if (!window.confirm(`Remove "${entName}"?`)) return;
     const updatedDays = [...handover.days];
     updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements.splice(entIdx, 1);
-    await updateHandoverDaysInDb(updatedDays);
+    await updateHandoverDaysInDb(updatedDays, `Removed Entertainment: ${entName}`);
   };
 
-  // 11. SUBMIT HANDOVER (Prominently clickable)
+  // Save Production Remark directly onto a Component or Entertainment item
+  const handleSaveProductionRemark = async () => {
+    if (!editingRemarkItem) return;
+    const updatedDays = [...handover.days];
+    const event = updatedDays[selectedDayIndex].events[selectedEventIndex];
+
+    if (editingRemarkItem.type === "decor") {
+      event.decorComponents[editingRemarkItem.index].productionRemarks = remarkText.trim();
+    } else {
+      event.entertainmentElements[editingRemarkItem.index].productionRemarks = remarkText.trim();
+    }
+
+    await updateHandoverDaysInDb(updatedDays);
+    await logModification(
+      `Added Production Remark on ${editingRemarkItem.type === "decor" ? event.decorComponents[editingRemarkItem.index].name : event.entertainmentElements[editingRemarkItem.index].name}`,
+      remarkText.trim()
+    );
+
+    setEditingRemarkItem(null);
+    setRemarkText("");
+  };
+
+  // Sales Action: Submit to Backend
   const handleSubmitToBackend = async () => {
     if (!window.confirm("Submit this wedding handover to the Backend Production team?")) return;
-    
     await updateDoc(doc(db, "handovers", handoverId), {
       status: "Submitted to Backend",
       submittedAt: new Date().toISOString(),
     });
     setHandover((prev: any) => ({ ...prev, status: "Submitted to Backend" }));
 
+    await logModification("Handover Submitted", "Sales team completed event scope and submitted to Backend Production.");
     await addDoc(collection(db, "handovers", handoverId, "comments"), {
       author: user?.email || "Sales",
       role: role || "sales",
-      message: "🚨 Handover submitted to Backend Production team for review and execution.",
+      message: "🚨 Handover submitted for production review. Please verify specs and raise queries if any.",
       createdAt: new Date().toISOString(),
     });
-    alert("✅ Handover submitted to Backend Production team successfully!");
   };
 
-  // Post Comment
+  // Production Action: Approve Handover
+  const handleApproveHandover = async () => {
+    const remark = prompt("Production Approval: Enter any final execution remarks before approving:", "All dimensions and sound specs verified. Approved for setup.") || "Approved for setup";
+    
+    await updateDoc(doc(db, "handovers", handoverId), {
+      status: "Approved for Production",
+      approvedAt: new Date().toISOString(),
+      approvedBy: user?.email,
+    });
+    setHandover((prev: any) => ({ ...prev, status: "Approved for Production" }));
+
+    await logModification("Handover Approved by Production", remark);
+    await addDoc(collection(db, "handovers", handoverId, "comments"), {
+      author: user?.email || "Production",
+      role: role || "production",
+      message: `✅ Handover APPROVED for on-site production! Remarks: ${remark}`,
+      createdAt: new Date().toISOString(),
+    });
+    alert("🎉 Handover has been officially approved for production!");
+  };
+
+  // Send Comment in Trail (With optional Item Tagging)
   const handleSendComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim()) return;
 
     await addDoc(collection(db, "handovers", handoverId, "comments"), {
       author: user?.email || "User",
-      role: role || "production",
+      role: role || "sales",
       message: newComment.trim(),
+      taggedItem: commentTaggedItem || null, // Item reference
       createdAt: new Date().toISOString(),
     });
+
     setNewComment("");
+    setCommentTaggedItem("");
   };
 
   if (!handover) return <div className="p-8 text-center text-xl font-bold">Loading Handover Workspace...</div>;
 
   const currentDay = handover.days?.[selectedDayIndex];
   const currentEvent = currentDay?.events?.[selectedEventIndex];
+  const taggableItems = getAllTaggableItems();
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 pb-16">
-      {/* Top Banner with Always-Visible Action Buttons */}
+      {/* Header Bar */}
       <div className="bg-white border-b-2 border-gray-300 shadow-sm sticky top-16 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-black text-gray-900">{handover.title}</h1>
               <span className={`text-xs uppercase font-black px-2.5 py-1 rounded border ${
-                handover.status === "Submitted to Backend" 
+                handover.status === "Approved for Production"
+                  ? "bg-green-100 text-green-900 border-green-400"
+                  : handover.status === "Submitted to Backend" 
                   ? "bg-amber-100 text-amber-900 border-amber-300 animate-pulse"
                   : "bg-purple-100 text-purple-950 border-purple-300"
               }`}>
@@ -398,7 +472,7 @@ export default function HandoverWorkspace() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Tabs */}
+            {/* Main Tabs */}
             <div className="bg-gray-100 p-1 rounded-lg border border-gray-300 flex">
               <button
                 onClick={() => setActiveTab("scope")}
@@ -406,7 +480,7 @@ export default function HandoverWorkspace() {
                   activeTab === "scope" ? "bg-white text-gray-900 shadow" : "text-gray-600"
                 }`}
               >
-                📋 Event Scope & Setup
+                📋 Scope & Setup
               </button>
               <button
                 onClick={() => setActiveTab("discussion")}
@@ -414,34 +488,57 @@ export default function HandoverWorkspace() {
                   activeTab === "discussion" ? "bg-white text-purple-900 shadow" : "text-gray-600"
                 }`}
               >
-                💬 Discussion Trail
+                💬 Discussion
                 {comments.length > 0 && (
-                  <span className="bg-purple-700 text-white text-[10px] px-1.5 py-0.2 rounded-full">
+                  <span className="bg-purple-700 text-white text-[10px] px-1.5 rounded-full">
                     {comments.length}
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setActiveTab("audit")}
+                className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1 ${
+                  activeTab === "audit" ? "bg-white text-blue-900 shadow" : "text-gray-600"
+                }`}
+              >
+                📜 Audit Log ({handover.auditLogs?.length || 0})
+              </button>
             </div>
 
-            {/* Always Visible Submit / Status Button */}
-            {handover.status === "Draft" ? (
+            {/* Workflow Action Buttons */}
+            {/* 1. Sales Submit Button */}
+            {isSales && handover.status === "Draft" && (
               <button
                 onClick={handleSubmitToBackend}
-                className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5"
+                className="bg-purple-700 hover:bg-purple-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5"
               >
-                🚀 Submit to Backend Team
+                🚀 Submit to Backend
               </button>
-            ) : (
+            )}
+
+            {/* 2. Production Approve Button */}
+            {isProductionOrAdmin && handover.status === "Submitted to Backend" && (
               <button
-                onClick={() => {
-                  if (window.confirm("Revert this handover back to Draft for editing?")) {
-                    updateDoc(doc(db, "handovers", handoverId), { status: "Draft" });
+                onClick={handleApproveHandover}
+                className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5 animate-bounce"
+              >
+                ✅ Approve for Production
+              </button>
+            )}
+
+            {/* Reopen to Draft if needed */}
+            {handover.status !== "Draft" && (
+              <button
+                onClick={async () => {
+                  if (window.confirm("Reopen handover for modifications?")) {
+                    await updateDoc(doc(db, "handovers", handoverId), { status: "Draft" });
                     setHandover((prev: any) => ({ ...prev, status: "Draft" }));
+                    await logModification("Handover Reopened", "Reopened for scope modifications.");
                   }
                 }}
-                className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs"
+                className="text-[11px] font-bold text-gray-500 hover:underline"
               >
-                ✓ Submitted (Click to Reopen Draft)
+                Reopen Draft
               </button>
             )}
           </div>
@@ -449,11 +546,11 @@ export default function HandoverWorkspace() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 mt-6">
+        {/* VIEW 1: EVENT SCOPE */}
         {activeTab === "scope" && (
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-            {/* Left Sidebar: Days & Sub-Events Navigation */}
+            {/* Days Sidebar */}
             <div className="md:col-span-4 space-y-4">
-              {/* 1. Days Card */}
               <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3">
                 <div className="flex justify-between items-center border-b pb-2">
                   <h3 className="font-black text-sm uppercase text-gray-900">1. Wedding Days</h3>
@@ -468,7 +565,6 @@ export default function HandoverWorkspace() {
                       <option value="Day Two">Day Two</option>
                       <option value="Day Three">Day Three</option>
                       <option value="Day Four">Day Four</option>
-                      <option value="Day Five">Day Five</option>
                     </select>
                     <button
                       onClick={handleAddDay}
@@ -479,7 +575,6 @@ export default function HandoverWorkspace() {
                   </div>
                 </div>
 
-                {/* Day Buttons List with Remove Day option */}
                 <div className="space-y-1.5">
                   {handover.days?.map((d: any, idx: number) => (
                     <div
@@ -499,12 +594,9 @@ export default function HandoverWorkspace() {
                       >
                         {d.dayName} ({d.events?.length || 0} events)
                       </button>
-
-                      {/* Remove Day Button */}
                       <button
                         type="button"
                         onClick={() => handleDeleteDay(idx)}
-                        title="Delete Day"
                         className={`text-xs font-black px-1.5 py-0.5 rounded hover:bg-red-600 hover:text-white ${
                           selectedDayIndex === idx ? "text-purple-200" : "text-red-600"
                         }`}
@@ -513,13 +605,10 @@ export default function HandoverWorkspace() {
                       </button>
                     </div>
                   ))}
-                  {(!handover.days || handover.days.length === 0) && (
-                    <p className="text-xs text-gray-500 italic">No days added yet. Click "+ Add" above.</p>
-                  )}
                 </div>
               </div>
 
-              {/* 2. Sub-Events on Selected Day */}
+              {/* Sub-Events */}
               {currentDay && (
                 <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3">
                   <div className="border-b pb-2">
@@ -528,17 +617,13 @@ export default function HandoverWorkspace() {
                     </h3>
                   </div>
 
-                  {/* Add Sub-Event Form (With Custom Event Name Support) */}
                   <div className="bg-gray-50 p-3 rounded-lg border space-y-2 text-xs">
-                    <p className="font-bold text-gray-800">Add Sub-Event:</p>
-                    
                     <div className="space-y-1.5">
                       <select
                         value={isCustomEventName ? "custom" : newEventName}
                         onChange={(e) => {
-                          if (e.target.value === "custom") {
-                            setIsCustomEventName(true);
-                          } else {
+                          if (e.target.value === "custom") setIsCustomEventName(true);
+                          else {
                             setIsCustomEventName(false);
                             setNewEventName(e.target.value);
                           }
@@ -552,17 +637,15 @@ export default function HandoverWorkspace() {
                         <option value="Baraat & Wedding">Baraat & Wedding</option>
                         <option value="Reception">Reception</option>
                         <option value="Pool Party">Pool Party</option>
-                        <option value="After Party">After Party</option>
                         <option value="custom" className="text-purple-700 font-black">+ Custom Event...</option>
                       </select>
 
                       {isCustomEventName && (
                         <input
-                          required
-                          placeholder="Type Custom Event Name (e.g. Sufi Night, Carnival)"
+                          placeholder="Type Event Name (e.g. Sufi Night, Carnival)"
                           value={customEventInput}
                           onChange={(e) => setCustomEventInput(e.target.value)}
-                          className="w-full border-2 border-purple-500 p-1.5 rounded font-bold bg-white text-purple-950"
+                          className="w-full border-2 border-purple-500 p-1.5 rounded font-bold bg-white"
                         />
                       )}
                     </div>
@@ -590,7 +673,6 @@ export default function HandoverWorkspace() {
                     </button>
                   </div>
 
-                  {/* Sub-Events List with Remove Event Option */}
                   <div className="space-y-1.5">
                     {currentDay.events?.map((ev: any, idx: number) => (
                       <div
@@ -601,61 +683,41 @@ export default function HandoverWorkspace() {
                             : "bg-white border-gray-200 hover:bg-gray-50"
                         }`}
                       >
-                        <div
-                          onClick={() => setSelectedEventIndex(idx)}
-                          className="cursor-pointer flex-1"
-                        >
+                        <div onClick={() => setSelectedEventIndex(idx)} className="cursor-pointer flex-1">
                           <p className="font-black text-sm text-gray-900">{ev.eventName}</p>
                           <p className="text-[11px] text-gray-500 font-semibold">
-                            📍 {ev.locationInResort || "Location not set"} | ⏰ {ev.setupReadyTime || "Time TBD"}
+                            📍 {ev.locationInResort || "TBD"} | ⏰ {ev.setupReadyTime || "TBD"}
                           </p>
                         </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
-                            {ev.decorComponents?.length || 0} Decor
-                          </span>
-                          {/* Remove Event Button */}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteEvent(idx)}
-                            title="Delete Event"
-                            className="text-red-600 hover:bg-red-50 p-1 rounded font-bold text-xs"
-                          >
-                            ✕
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEvent(idx)}
+                          className="text-red-600 hover:bg-red-50 p-1 rounded font-bold text-xs"
+                        >
+                          ✕
+                        </button>
                       </div>
                     ))}
-
-                    {(!currentDay.events || currentDay.events.length === 0) && (
-                      <p className="text-xs text-gray-400 italic">No events on this day yet.</p>
-                    )}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Right Main Area: Event Scopes */}
+            {/* Event Scope Main Panel */}
             <div className="md:col-span-8">
               {currentEvent ? (
                 <div className="bg-white rounded-xl border-2 border-gray-300 p-6 space-y-6 shadow-sm">
-                  {/* Event Top Header */}
+                  {/* Event Top Bar */}
                   <div className="border-b pb-4 flex flex-col md:flex-row md:items-center justify-between gap-2">
                     <div>
                       <span className="text-xs font-black uppercase text-purple-700 tracking-wider">
                         {currentDay.dayName} &gt; {currentEvent.eventName}
                       </span>
                       <h2 className="text-2xl font-black text-gray-900">
-                        {currentEvent.eventName} Scope & Specifications
+                        {currentEvent.eventName} Scope
                       </h2>
-                      <p className="text-xs font-bold text-gray-600 mt-0.5">
-                        📍 Venue: <span className="text-black">{currentEvent.locationInResort || "TBD"}</span> | ⏰ Setup Ready:{" "}
-                        <span className="text-black">{currentEvent.setupReadyTime || "TBD"}</span>
-                      </p>
                     </div>
 
-                    {/* Scope Tabs */}
                     <div className="flex bg-gray-100 p-1 rounded-lg border">
                       <button
                         onClick={() => setEventScopeTab("decor")}
@@ -676,298 +738,216 @@ export default function HandoverWorkspace() {
                     </div>
                   </div>
 
-                  {/* Color Theme Selector with Swatches & Delete Swatch */}
+                  {/* Color Palette */}
                   <div className="bg-amber-50/60 p-3.5 rounded-xl border-2 border-amber-200 space-y-2">
-                    <p className="text-xs font-black text-amber-950 uppercase">🎨 Event Color Palette & Themes:</p>
-
+                    <p className="text-xs font-black text-amber-950 uppercase">🎨 Event Color Palette:</p>
                     <div className="flex flex-wrap gap-2">
                       {currentEvent.colorThemes?.map((ct: any, idx: number) => (
-                        <div key={idx} className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-full border shadow-sm text-xs font-bold">
+                        <div key={idx} className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-full border text-xs font-bold">
                           <span className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: ct.hex }} />
                           <span>{ct.role}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteColorTheme(idx)}
-                            className="text-red-500 hover:text-red-700 font-black ml-1 text-xs"
-                          >
-                            ✕
-                          </button>
+                          <button onClick={() => handleDeleteColorTheme(idx)} className="text-red-500 font-bold ml-1">✕</button>
                         </div>
                       ))}
                     </div>
-
                     <div className="flex items-center gap-2 pt-1">
-                      <input
-                        type="color"
-                        value={colorHex}
-                        onChange={(e) => setColorHex(e.target.value)}
-                        className="h-8 w-10 border rounded cursor-pointer p-0.5 bg-white"
-                      />
-                      <input
-                        placeholder="e.g. Major (70% Drapes), Minor (Florals)"
-                        value={colorRole}
-                        onChange={(e) => setColorRole(e.target.value)}
-                        className="border p-1.5 rounded text-xs font-bold flex-1 bg-white"
-                      />
-                      <button
-                        onClick={handleAddColorTheme}
-                        className="bg-amber-800 text-white px-3 py-1.5 rounded text-xs font-bold"
-                      >
-                        + Add Color
-                      </button>
+                      <input type="color" value={colorHex} onChange={(e) => setColorHex(e.target.value)} className="h-8 w-10 border rounded bg-white" />
+                      <input placeholder="e.g. Major Drapery, Minor Accent" value={colorRole} onChange={(e) => setColorRole(e.target.value)} className="border p-1.5 rounded text-xs font-bold flex-1 bg-white" />
+                      <button onClick={handleAddColorTheme} className="bg-amber-800 text-white px-3 py-1.5 rounded text-xs font-bold">+ Add Color</button>
                     </div>
                   </div>
 
-                  {/* TAB 1: DECOR COMPONENTS */}
+                  {/* TAB 1: DECOR */}
                   {eventScopeTab === "decor" && (
                     <div className="space-y-6">
-                      {/* Form: Add Component to Scope */}
+                      {/* Add Form */}
                       <div className="bg-slate-50 p-4 rounded-xl border-2 border-slate-300 space-y-3">
-                        <h4 className="font-black text-xs uppercase text-slate-800">
-                          + Add Decor Component to {currentEvent.eventName}:
-                        </h4>
-
+                        <h4 className="font-black text-xs uppercase text-slate-800">+ Attach Decor Component:</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-black text-gray-700 mb-1">Select Component *</label>
-                            <select
-                              value={selectedCompId}
-                              onChange={(e) => setSelectedCompId(e.target.value)}
-                              className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
-                            >
-                              <option value="">-- Choose Stage, Gate, Canopy, Lounge --</option>
-                              {componentsLibrary.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  [{c.category}] {c.name} ({c.code || "COMP"})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-black text-gray-700 mb-1">Placement / Location in Venue</label>
-                            <input
-                              placeholder="e.g. Lawn Center, Main Arch Gate"
-                              value={compPlacement}
-                              onChange={(e) => setCompPlacement(e.target.value)}
-                              className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-black text-gray-700 mb-1">Size Modification (Optional)</label>
-                            <input
-                              placeholder="e.g. Increased to 28x16 ft"
-                              value={compCustomSize}
-                              onChange={(e) => setCompCustomSize(e.target.value)}
-                              className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-black text-gray-700 mb-1">Color Variation / Drapery Change</label>
-                            <input
-                              placeholder="e.g. All White flowers + gold backdrop"
-                              value={compColorVariation}
-                              onChange={(e) => setCompColorVariation(e.target.value)}
-                              className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                            />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-black text-gray-700 mb-1">Specific Client Changes / Written Notes</label>
-                          <textarea
-                            rows={2}
-                            placeholder="e.g. Bride requested hanging bells from the arch. Extra truss weight needed."
-                            value={compClientChanges}
-                            onChange={(e) => setCompClientChanges(e.target.value)}
-                            className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                          <select
+                            value={selectedCompId}
+                            onChange={(e) => setSelectedCompId(e.target.value)}
+                            className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
+                          >
+                            <option value="">-- Choose Stage, Gate, Canopy, Lounge --</option>
+                            {componentsLibrary.map((c) => (
+                              <option key={c.id} value={c.id}>[{c.category}] {c.name} ({c.code})</option>
+                            ))}
+                          </select>
+                          <input
+                            placeholder="Placement in venue (e.g. Center Stage Lawn)"
+                            value={compPlacement}
+                            onChange={(e) => setCompPlacement(e.target.value)}
+                            className="border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
                           />
                         </div>
 
-                        {/* Audio Note */}
-                        <div className="flex items-center gap-3 bg-purple-50 p-2.5 rounded-lg border border-purple-200">
-                          <span className="text-xs font-black text-purple-900">🎙️ Audio Note:</span>
-                          {!isRecording ? (
-                            <button
-                              type="button"
-                              onClick={startRecording}
-                              className="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs shadow"
-                            >
-                              🔴 Record
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={stopRecording}
-                              className="bg-black text-white font-bold px-2.5 py-1 rounded text-xs animate-pulse"
-                            >
-                              ⏹️ Stop
-                            </button>
-                          )}
-                          {compAudioFile && <span className="text-xs text-green-700 font-bold">✅ Audio recorded & attached</span>}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <input
+                            placeholder="Size changes (e.g. 28x16 ft)"
+                            value={compCustomSize}
+                            onChange={(e) => setCompCustomSize(e.target.value)}
+                            className="border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                          />
+                          <input
+                            placeholder="Color variation (e.g. White & Gold)"
+                            value={compColorVariation}
+                            onChange={(e) => setCompColorVariation(e.target.value)}
+                            className="border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                          />
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={handleAddDecorComponent}
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow"
-                        >
-                          + Add Component to Event Scope
+                        <textarea
+                          rows={2}
+                          placeholder="Client changes / specific requests..."
+                          value={compClientChanges}
+                          onChange={(e) => setCompClientChanges(e.target.value)}
+                          className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                        />
+
+                        {/* Audio Note */}
+                        <div className="flex items-center gap-3 bg-purple-50 p-2 rounded-lg border border-purple-200">
+                          <span className="text-xs font-black text-purple-900">🎙️ Voice Note:</span>
+                          {!isRecording ? (
+                            <button type="button" onClick={startRecording} className="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs">🔴 Record</button>
+                          ) : (
+                            <button type="button" onClick={stopRecording} className="bg-black text-white font-bold px-2.5 py-1 rounded text-xs animate-pulse">⏹️ Stop</button>
+                          )}
+                          {compAudioFile && <span className="text-xs text-green-700 font-bold">✅ Audio attached</span>}
+                        </div>
+
+                        <button onClick={handleAddDecorComponent} className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow">
+                          + Attach to Event Scope
                         </button>
                       </div>
 
-                      {/* Attached Decor Components with Remove Button */}
-                      <div className="space-y-3">
-                        <h4 className="font-black text-sm text-gray-900">
-                          Decor Scope for {currentEvent.eventName} ({currentEvent.decorComponents?.length || 0}):
-                        </h4>
-
+                      {/* Items Cards */}
+                      <div className="space-y-4">
                         {currentEvent.decorComponents?.map((item: any, idx: number) => (
-                          <div key={idx} className="bg-white border-2 border-gray-300 rounded-xl p-4 space-y-2 relative">
+                          <div key={idx} className="bg-white border-2 border-gray-300 rounded-xl p-4 space-y-3 shadow-sm">
                             <div className="flex justify-between items-start">
                               <div>
-                                <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">
-                                  {item.category}
-                                </span>
+                                <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">{item.category}</span>
                                 <h5 className="font-black text-lg text-gray-900 mt-1">{item.name}</h5>
-                                <p className="text-xs font-semibold text-purple-800">
-                                  📍 Placement: {item.placement || "Venue Area"}
-                                </p>
+                                <p className="text-xs font-semibold text-purple-800">📍 Placement: {item.placement || "Venue Area"}</p>
                               </div>
-
                               <div className="flex items-center gap-2">
-                                <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">
-                                  {item.code}
-                                </span>
-
-                                {/* REMOVE COMPONENT BUTTON */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteDecorComponent(idx)}
-                                  className="bg-red-50 text-red-700 border border-red-300 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold"
-                                >
-                                  Remove
-                                </button>
+                                <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">{item.code}</span>
+                                <button onClick={() => handleDeleteDecorComponent(idx)} className="text-red-600 font-bold text-xs bg-red-50 p-1.5 rounded border border-red-200">Remove</button>
                               </div>
                             </div>
 
                             <div className="bg-gray-50 p-2.5 rounded-lg border text-xs font-medium space-y-1">
                               {item.customSize && <p>📐 <strong>Size:</strong> {item.customSize}</p>}
-                              {item.colorVariation && <p>🎨 <strong>Color Changes:</strong> {item.colorVariation}</p>}
+                              {item.colorVariation && <p>🎨 <strong>Color:</strong> {item.colorVariation}</p>}
                               {item.clientChanges && <p className="text-amber-900">✏️ <strong>Notes:</strong> {item.clientChanges}</p>}
                             </div>
 
-                            {item.audioUrl && (
-                              <div className="pt-1">
-                                <p className="text-xs font-black text-purple-900 mb-1">🎙️ Audio Note:</p>
-                                <audio controls src={item.audioUrl} className="w-full h-8" />
+                            {/* Dedicated Production Remark Box */}
+                            <div className="bg-blue-50/70 border border-blue-200 p-2.5 rounded-lg">
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="text-xs font-black text-blue-950">🛠️ Production Execution Remarks:</span>
+                                <button
+                                  onClick={() => {
+                                    setEditingRemarkItem({ type: 'decor', index: idx, currentRemark: item.productionRemarks || "" });
+                                    setRemarkText(item.productionRemarks || "");
+                                  }}
+                                  className="text-[11px] text-blue-700 font-bold hover:underline"
+                                >
+                                  {item.productionRemarks ? "Edit Remark" : "+ Add Production Remark"}
+                                </button>
                               </div>
+                              <p className="text-xs font-semibold text-gray-800">
+                                {item.productionRemarks ? item.productionRemarks : <span className="text-gray-400 italic">No production remarks added yet.</span>}
+                              </p>
+                            </div>
+
+                            {item.audioUrl && (
+                              <audio controls src={item.audioUrl} className="w-full h-8" />
                             )}
                           </div>
                         ))}
-
-                        {(!currentEvent.decorComponents || currentEvent.decorComponents.length === 0) && (
-                          <p className="text-xs text-gray-400 italic">No decor components added to this event yet.</p>
-                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* TAB 2: ENTERTAINMENT & SFX */}
+                  {/* TAB 2: ENTERTAINMENT */}
                   {eventScopeTab === "entertainment" && (
                     <div className="space-y-6">
                       <div className="bg-purple-50/50 p-4 rounded-xl border-2 border-purple-200 space-y-3">
-                        <h4 className="font-black text-xs uppercase text-purple-900">
-                          + Add Audio / SFX / Entertainment:
-                        </h4>
-
+                        <h4 className="font-black text-xs uppercase text-purple-900">+ Attach Entertainment / SFX:</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-black text-gray-700 mb-1">Select Item *</label>
-                            <select
-                              value={selectedEntId}
-                              onChange={(e) => {
-                                setSelectedEntId(e.target.value);
-                                setSelectedVariantId("");
-                              }}
-                              className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
-                            >
-                              <option value="">-- Choose Sound, Anchor, SFX, Live Stall --</option>
-                              {entertainmentLibrary.map((ent) => (
-                                <option key={ent.id} value={ent.id}>
-                                  [{ent.category}] {ent.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          <select
+                            value={selectedEntId}
+                            onChange={(e) => {
+                              setSelectedEntId(e.target.value);
+                              setSelectedVariantId("");
+                            }}
+                            className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
+                          >
+                            <option value="">-- Choose Sound, Anchor, SFX, Stall --</option>
+                            {entertainmentLibrary.map((ent) => (
+                              <option key={ent.id} value={ent.id}>[{ent.category}] {ent.name}</option>
+                            ))}
+                          </select>
 
                           {selectedEntId && (
-                            <div>
-                              <label className="block text-xs font-black text-gray-700 mb-1">Select Brand / Variant</label>
-                              <select
-                                value={selectedVariantId}
-                                onChange={(e) => setSelectedVariantId(e.target.value)}
-                                className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
-                              >
-                                <option value="">Standard Setup</option>
-                                {entertainmentLibrary
-                                  .find((e) => e.id === selectedEntId)
-                                  ?.variants?.map((v: any) => (
-                                    <option key={v.id} value={v.id}>
-                                      {v.name} (₹{v.price} / {v.pricingUnit})
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
+                            <select
+                              value={selectedVariantId}
+                              onChange={(e) => setSelectedVariantId(e.target.value)}
+                              className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
+                            >
+                              <option value="">Standard Setup</option>
+                              {entertainmentLibrary.find((e) => e.id === selectedEntId)?.variants?.map((v: any) => (
+                                <option key={v.id} value={v.id}>{v.name} (₹{v.price} / {v.pricingUnit})</option>
+                              ))}
+                            </select>
                           )}
                         </div>
 
-                        <div>
-                          <label className="block text-xs font-black text-gray-700 mb-1">Execution Notes</label>
-                          <input
-                            placeholder="e.g. Fire 6 cold pyros during couple entry; line array mounted at 45 deg"
-                            value={entNotes}
-                            onChange={(e) => setEntNotes(e.target.value)}
-                            className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                          />
-                        </div>
+                        <input
+                          placeholder="Execution instructions (e.g. 6 cold pyros during entry)"
+                          value={entNotes}
+                          onChange={(e) => setEntNotes(e.target.value)}
+                          className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                        />
 
-                        <button
-                          type="button"
-                          onClick={handleAddEntertainment}
-                          className="bg-purple-700 hover:bg-purple-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow"
-                        >
+                        <button onClick={handleAddEntertainment} className="bg-purple-700 hover:bg-purple-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow">
                           + Attach Entertainment Element
                         </button>
                       </div>
 
-                      {/* Attached Entertainment with Remove Button */}
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         {currentEvent.entertainmentElements?.map((item: any, idx: number) => (
-                          <div key={idx} className="bg-white border-2 border-gray-200 p-3 rounded-lg flex justify-between items-center text-xs">
-                            <div>
-                              <span className="font-bold text-purple-900 text-sm">
-                                🎤 {item.name} {item.variantName && `(${item.variantName})`}
-                              </span>
-                              {item.notes && <p className="text-gray-600 mt-0.5">Note: {item.notes}</p>}
+                          <div key={idx} className="bg-white border-2 border-gray-200 p-3.5 rounded-lg space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-bold text-purple-900 text-sm">🎤 {item.name} {item.variantName && `(${item.variantName})`}</span>
+                                {item.notes && <p className="text-gray-600 mt-0.5">Note: {item.notes}</p>}
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="font-black text-blue-700">₹{item.price?.toLocaleString()} / {item.pricingUnit}</span>
+                                <button onClick={() => handleDeleteEntertainment(idx)} className="text-red-600 font-bold">Remove</button>
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-3">
-                              <span className="font-black text-blue-700">
-                                ₹{item.price?.toLocaleString()} / {item.pricingUnit}
-                              </span>
-                              {/* REMOVE ENTERTAINMENT BUTTON */}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteEntertainment(idx)}
-                                className="text-red-600 hover:bg-red-50 px-2 py-1 rounded font-bold border border-red-200"
-                              >
-                                Remove
-                              </button>
+                            {/* Dedicated Production Remark Box */}
+                            <div className="bg-blue-50/70 border border-blue-200 p-2 rounded-lg">
+                              <div className="flex justify-between items-center mb-0.5">
+                                <span className="text-[11px] font-black text-blue-950">🛠️ Production Execution Remarks:</span>
+                                <button
+                                  onClick={() => {
+                                    setEditingRemarkItem({ type: 'ent', index: idx, currentRemark: item.productionRemarks || "" });
+                                    setRemarkText(item.productionRemarks || "");
+                                  }}
+                                  className="text-[10px] text-blue-700 font-bold hover:underline"
+                                >
+                                  {item.productionRemarks ? "Edit Remark" : "+ Add Remark"}
+                                </button>
+                              </div>
+                              <p className="text-xs font-semibold text-gray-800">
+                                {item.productionRemarks || <span className="text-gray-400 italic">No production remarks added yet.</span>}
+                              </p>
                             </div>
                           </div>
                         ))}
@@ -977,30 +957,33 @@ export default function HandoverWorkspace() {
                 </div>
               ) : (
                 <div className="bg-white p-12 text-center rounded-xl border-2 border-dashed border-gray-300">
-                  <p className="text-gray-500 font-bold">Select or create a sub-event on the left to start building its scope.</p>
+                  <p className="text-gray-500 font-bold">Select or add a sub-event on the left to start building its scope.</p>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* VIEW 2: DISCUSSION TRAIL */}
+        {/* VIEW 2: DISCUSSION TRAIL WITH ITEM TAGGING */}
         {activeTab === "discussion" && (
           <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-6">
             <div className="border-b pb-3">
               <h3 className="text-xl font-black text-gray-900">Communication & Questions Trail</h3>
               <p className="text-xs font-semibold text-gray-500">
-                Backend team and Sales team can ask questions, clarify sizes, and confirm production details here.
+                Production and Sales teams can clarify dimensions, sound riders, and tag specific components for context.
               </p>
             </div>
 
+            {/* Comments List */}
             <div className="space-y-4 max-h-[500px] overflow-y-auto p-2">
               {comments.map((c) => (
-                <div key={c.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg text-xs space-y-1">
+                <div key={c.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg text-xs space-y-1.5">
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <span className="font-black text-gray-900">{c.author}</span>
-                      <span className="uppercase text-[10px] font-black bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                      <span className={`uppercase text-[10px] font-black px-1.5 py-0.5 rounded ${
+                        c.role === "production" ? "bg-blue-100 text-blue-800" : "bg-purple-100 text-purple-800"
+                      }`}>
                         {c.role}
                       </span>
                     </div>
@@ -1008,30 +991,132 @@ export default function HandoverWorkspace() {
                       {new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
+
+                  {/* Tagged Item Badge */}
+                  {c.taggedItem && (
+                    <div className="inline-block bg-purple-100 border border-purple-300 text-purple-900 font-bold px-2 py-0.5 rounded text-[11px]">
+                      📌 Referencing: {c.taggedItem}
+                    </div>
+                  )}
+
                   <p className="text-sm font-medium text-gray-800">{c.message}</p>
                 </div>
               ))}
-
-              {comments.length === 0 && (
-                <p className="text-center text-gray-400 text-xs py-8">No comments yet. Start the discussion below.</p>
-              )}
             </div>
 
-            <form onSubmit={handleSendComment} className="flex gap-2 border-t pt-4">
-              <input
-                required
-                placeholder="Type your question or production note here..."
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                className="flex-1 border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white outline-none focus:border-purple-600"
-              />
-              <button
-                type="submit"
-                className="bg-purple-700 hover:bg-purple-800 text-white font-black px-5 py-2 rounded-lg text-xs shadow"
-              >
-                Send Message
-              </button>
+            {/* Post Comment Form */}
+            <form onSubmit={handleSendComment} className="space-y-3 border-t pt-4">
+              {/* Optional Item Tagging Dropdown */}
+              <div>
+                <label className="block text-xs font-black text-gray-700 mb-1">
+                  Tag a Component or SFX Item in this Question (Optional):
+                </label>
+                <select
+                  value={commentTaggedItem}
+                  onChange={(e) => setCommentTaggedItem(e.target.value)}
+                  className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white"
+                >
+                  <option value="">-- General Question (No specific item tagged) --</option>
+                  {taggableItems.map((tag, idx) => (
+                    <option key={idx} value={tag}>📌 {tag}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  required
+                  placeholder="Type your message or clarification here..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  className="flex-1 border-2 border-gray-400 p-2.5 rounded-lg font-medium text-xs bg-white outline-none focus:border-purple-600"
+                />
+                <button
+                  type="submit"
+                  className="bg-purple-700 hover:bg-purple-800 text-white font-black px-6 py-2.5 rounded-lg text-xs shadow"
+                >
+                  Send Message
+                </button>
+              </div>
             </form>
+          </div>
+        )}
+
+        {/* VIEW 3: AUDIT & MODIFICATION LOG (WHO, WHEN, REMARKS) */}
+        {activeTab === "audit" && (
+          <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-4">
+            <div className="border-b pb-3">
+              <h3 className="text-xl font-black text-gray-900">📜 Modification & Audit Trail</h3>
+              <p className="text-xs font-semibold text-gray-500">
+                Transparent record of who made changes to this wedding handover, the exact time, and their remark.
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              {handover.auditLogs?.map((log: any, idx: number) => (
+                <div key={idx} className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs space-y-1">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-gray-900">{log.author}</span>
+                      <span className="uppercase text-[10px] font-black bg-gray-200 text-gray-700 px-1.5 py-0.2 rounded">
+                        {log.role}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-gray-500 font-mono">
+                      {new Date(log.timestamp).toLocaleString()}
+                    </span>
+                  </div>
+
+                  <p className="font-bold text-blue-900">Action: {log.action}</p>
+                  <p className="text-gray-700 bg-white p-1.5 rounded border border-gray-200">
+                    <strong>Remark / Reason:</strong> {log.remark}
+                  </p>
+                </div>
+              ))}
+
+              {(!handover.auditLogs || handover.auditLogs.length === 0) && (
+                <p className="text-center text-gray-400 py-12 text-xs italic">
+                  No modifications logged yet. Changes made after initial draft submission will appear here.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* PRODUCTION REMARK MODAL */}
+        {editingRemarkItem && (
+          <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl max-w-md w-full p-6 border-2 border-gray-400 shadow-2xl space-y-4">
+              <h3 className="text-lg font-black text-gray-900">
+                Add / Update Production Execution Remark
+              </h3>
+              <p className="text-xs text-gray-600 font-medium">
+                Add specific setup instructions or constraints for site engineers and supervisors.
+              </p>
+
+              <textarea
+                rows={4}
+                placeholder="e.g. Truss setup requires 6 ballast weights. Must be assembled at 10 AM before floral team arrives."
+                value={remarkText}
+                onChange={(e) => setRemarkText(e.target.value)}
+                className="w-full border-2 border-gray-400 p-2.5 rounded-lg text-xs font-semibold bg-white"
+              />
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  onClick={() => setEditingRemarkItem(null)}
+                  className="px-4 py-1.5 border font-bold rounded text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveProductionRemark}
+                  className="px-4 py-1.5 bg-blue-700 text-white font-black rounded text-xs"
+                >
+                  Save Remark
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
