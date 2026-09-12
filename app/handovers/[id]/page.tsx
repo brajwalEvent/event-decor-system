@@ -30,27 +30,28 @@ export default function HandoverWorkspace() {
   // Tab: "scope" | "discussion"
   const [activeTab, setActiveTab] = useState<"scope" | "discussion">("scope");
 
-  // Selected Day & Event for editing
+  // Selected Day & Event indices
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
   const [selectedEventIndex, setSelectedEventIndex] = useState<number>(0);
 
-  // Sub-Event Tab: "decor" | "entertainment"
+  // Scope Tab: "decor" | "entertainment"
   const [eventScopeTab, setEventScopeTab] = useState<"decor" | "entertainment">("decor");
 
   // Add Day State
   const [newDayName, setNewDayName] = useState("Day One");
 
-  // Add Event State
+  // Add Event State (with Custom Event support)
   const [newEventName, setNewEventName] = useState("Haldi");
+  const [isCustomEventName, setIsCustomEventName] = useState(false);
+  const [customEventInput, setCustomEventInput] = useState("");
   const [newEventLocation, setNewEventLocation] = useState("");
   const [newEventReadyTime, setNewEventReadyTime] = useState("");
-  const [newEventStartTime, setNewEventStartTime] = useState("");
 
-  // Color Theme item
+  // Color Theme state
   const [colorHex, setColorHex] = useState("#FFD700");
   const [colorRole, setColorRole] = useState("Major Drapery");
 
-  // Add Decor Component to Event
+  // Add Component state
   const [selectedCompId, setSelectedCompId] = useState("");
   const [compCustomSize, setCompCustomSize] = useState("");
   const [compColorVariation, setCompColorVariation] = useState("");
@@ -61,7 +62,7 @@ export default function HandoverWorkspace() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // Add Entertainment to Event
+  // Add Entertainment state
   const [selectedEntId, setSelectedEntId] = useState("");
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [entNotes, setEntNotes] = useState("");
@@ -70,30 +71,27 @@ export default function HandoverWorkspace() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Fetch Handover & Libraries
+  // Fetch Handover & Master Libraries
   const fetchHandoverAndMasterData = async () => {
     try {
-      // Handover Doc
       const hSnap = await getDoc(doc(db, "handovers", handoverId));
       if (hSnap.exists()) {
-        const data = hSnap.data();
-        setHandover(data);
+        setHandover(hSnap.data());
       }
 
       // Components
-      const cSnap = await getDoc(doc(db, "metadata", "placeholder")).catch(() => null);
-      const comps = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
+      const compsSnap = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
         const snap = await getDocs(collection(db, "components"));
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       });
-      setComponentsLibrary(comps);
+      setComponentsLibrary(compsSnap);
 
       // Entertainment
-      const ents = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
+      const entsSnap = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
         const snap = await getDocs(collection(db, "entertainment"));
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       });
-      setEntertainmentLibrary(ents);
+      setEntertainmentLibrary(entsSnap);
     } catch (err) {
       console.error(err);
     }
@@ -103,7 +101,7 @@ export default function HandoverWorkspace() {
     if (handoverId) fetchHandoverAndMasterData();
   }, [handoverId]);
 
-  // Real-time comments listener
+  // Comments Stream
   useEffect(() => {
     if (!handoverId) return;
     const q = query(
@@ -116,7 +114,7 @@ export default function HandoverWorkspace() {
     return () => unsubscribe();
   }, [handoverId]);
 
-  // Save full handover changes to Firebase
+  // Save to Firebase Helper
   const updateHandoverDaysInDb = async (updatedDays: any[]) => {
     try {
       await updateDoc(doc(db, "handovers", handoverId), {
@@ -126,11 +124,11 @@ export default function HandoverWorkspace() {
       setHandover((prev: any) => ({ ...prev, days: updatedDays }));
     } catch (err) {
       console.error("Save error:", err);
-      alert("Failed to update handover.");
+      alert("Failed to save changes.");
     }
   };
 
-  // Add Day
+  // 1. ADD DAY
   const handleAddDay = async () => {
     const updatedDays = [...(handover.days || [])];
     updatedDays.push({
@@ -141,20 +139,37 @@ export default function HandoverWorkspace() {
     setSelectedDayIndex(updatedDays.length - 1);
   };
 
-  // Add Event to selected Day
+  // 2. DELETE DAY
+  const handleDeleteDay = async (dayIndex: number) => {
+    const dayToDelete = handover.days[dayIndex];
+    if (!window.confirm(`Are you sure you want to delete "${dayToDelete.dayName}" and all its events?`)) return;
+
+    const updatedDays = handover.days.filter((_: any, idx: number) => idx !== dayIndex);
+    await updateHandoverDaysInDb(updatedDays);
+    setSelectedDayIndex(0);
+    setSelectedEventIndex(0);
+  };
+
+  // 3. ADD SUB-EVENT (Supports Custom Names)
   const handleAddEvent = async () => {
     if (!handover.days || handover.days.length === 0) {
       alert("Please add a Day first.");
       return;
     }
+
+    const finalEventName = isCustomEventName ? customEventInput.trim() : newEventName;
+    if (!finalEventName) {
+      alert("Please specify an event name.");
+      return;
+    }
+
     const updatedDays = [...handover.days];
     const targetDay = updatedDays[selectedDayIndex];
 
     targetDay.events.push({
-      eventName: newEventName,
-      locationInResort: newEventLocation,
-      setupReadyTime: newEventReadyTime,
-      eventStartTime: newEventStartTime,
+      eventName: finalEventName,
+      locationInResort: newEventLocation.trim(),
+      setupReadyTime: newEventReadyTime.trim(),
       colorThemes: [],
       decorComponents: [],
       entertainmentElements: [],
@@ -164,24 +179,40 @@ export default function HandoverWorkspace() {
     setSelectedEventIndex(targetDay.events.length - 1);
     setNewEventLocation("");
     setNewEventReadyTime("");
+    setIsCustomEventName(false);
+    setCustomEventInput("");
   };
 
-  // Add Color Theme to selected Event
+  // 4. DELETE SUB-EVENT
+  const handleDeleteEvent = async (eventIndex: number) => {
+    const eventName = handover.days[selectedDayIndex].events[eventIndex].eventName;
+    if (!window.confirm(`Delete the event "${eventName}"?`)) return;
+
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events.splice(eventIndex, 1);
+    await updateHandoverDaysInDb(updatedDays);
+    setSelectedEventIndex(0);
+  };
+
+  // 5. ADD COLOR THEME
   const handleAddColorTheme = async () => {
     const updatedDays = [...handover.days];
     const currentEvent = updatedDays[selectedDayIndex]?.events[selectedEventIndex];
     if (!currentEvent) return;
 
     if (!currentEvent.colorThemes) currentEvent.colorThemes = [];
-    currentEvent.colorThemes.push({
-      hex: colorHex,
-      role: colorRole,
-    });
-
+    currentEvent.colorThemes.push({ hex: colorHex, role: colorRole });
     await updateHandoverDaysInDb(updatedDays);
   };
 
-  // Recording Audio
+  // 6. DELETE COLOR THEME
+  const handleDeleteColorTheme = async (colorIdx: number) => {
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].colorThemes.splice(colorIdx, 1);
+    await updateHandoverDaysInDb(updatedDays);
+  };
+
+  // Audio Recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -213,7 +244,7 @@ export default function HandoverWorkspace() {
     }
   };
 
-  // Add Decor Component to Event
+  // 7. ADD DECOR COMPONENT
   const handleAddDecorComponent = async () => {
     if (!selectedCompId) return;
     const master = componentsLibrary.find((c) => c.id === selectedCompId);
@@ -228,7 +259,6 @@ export default function HandoverWorkspace() {
 
     const updatedDays = [...handover.days];
     const currentEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
-
     if (!currentEvent.decorComponents) currentEvent.decorComponents = [];
 
     currentEvent.decorComponents.push({
@@ -236,7 +266,6 @@ export default function HandoverWorkspace() {
       name: master.name,
       category: master.category,
       code: master.code || "COMP",
-      baseCost: master.baseCost || 0,
       customSize: compCustomSize || `${master.dimensions?.length}x${master.dimensions?.width} ${master.dimensions?.unit}`,
       colorVariation: compColorVariation,
       placement: compPlacement,
@@ -246,7 +275,6 @@ export default function HandoverWorkspace() {
 
     await updateHandoverDaysInDb(updatedDays);
 
-    // Reset inputs
     setSelectedCompId("");
     setCompCustomSize("");
     setCompColorVariation("");
@@ -255,7 +283,15 @@ export default function HandoverWorkspace() {
     setCompAudioFile(null);
   };
 
-  // Add Entertainment item to Event
+  // 8. DELETE DECOR COMPONENT
+  const handleDeleteDecorComponent = async (compIdx: number) => {
+    if (!window.confirm("Remove this component from the event scope?")) return;
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].decorComponents.splice(compIdx, 1);
+    await updateHandoverDaysInDb(updatedDays);
+  };
+
+  // 9. ADD ENTERTAINMENT
   const handleAddEntertainment = async () => {
     if (!selectedEntId) return;
     const master = entertainmentLibrary.find((e) => e.id === selectedEntId);
@@ -294,25 +330,34 @@ export default function HandoverWorkspace() {
     setEntNotes("");
   };
 
-  // Submit Handover to Backend Team
+  // 10. DELETE ENTERTAINMENT
+  const handleDeleteEntertainment = async (entIdx: number) => {
+    if (!window.confirm("Remove this item?")) return;
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements.splice(entIdx, 1);
+    await updateHandoverDaysInDb(updatedDays);
+  };
+
+  // 11. SUBMIT HANDOVER (Prominently clickable)
   const handleSubmitToBackend = async () => {
     if (!window.confirm("Submit this wedding handover to the Backend Production team?")) return;
+    
     await updateDoc(doc(db, "handovers", handoverId), {
       status: "Submitted to Backend",
       submittedAt: new Date().toISOString(),
     });
     setHandover((prev: any) => ({ ...prev, status: "Submitted to Backend" }));
 
-    // Auto-post a system comment in the trail
     await addDoc(collection(db, "handovers", handoverId, "comments"), {
       author: user?.email || "Sales",
       role: role || "sales",
       message: "🚨 Handover submitted to Backend Production team for review and execution.",
       createdAt: new Date().toISOString(),
     });
+    alert("✅ Handover submitted to Backend Production team successfully!");
   };
 
-  // Send a comment in the trail
+  // Post Comment
   const handleSendComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim()) return;
@@ -326,20 +371,24 @@ export default function HandoverWorkspace() {
     setNewComment("");
   };
 
-  if (!handover) return <div className="p-8 text-center text-xl font-bold">Loading Workspace...</div>;
+  if (!handover) return <div className="p-8 text-center text-xl font-bold">Loading Handover Workspace...</div>;
 
   const currentDay = handover.days?.[selectedDayIndex];
   const currentEvent = currentDay?.events?.[selectedEventIndex];
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 pb-16">
-      {/* Top Banner */}
+      {/* Top Banner with Always-Visible Action Buttons */}
       <div className="bg-white border-b-2 border-gray-300 shadow-sm sticky top-16 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-black text-gray-900">{handover.title}</h1>
-              <span className="text-xs uppercase font-black px-2.5 py-1 rounded border bg-purple-100 text-purple-950 border-purple-300">
+              <span className={`text-xs uppercase font-black px-2.5 py-1 rounded border ${
+                handover.status === "Submitted to Backend" 
+                  ? "bg-amber-100 text-amber-900 border-amber-300 animate-pulse"
+                  : "bg-purple-100 text-purple-950 border-purple-300"
+              }`}>
                 {handover.status}
               </span>
             </div>
@@ -349,7 +398,7 @@ export default function HandoverWorkspace() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Tab switch */}
+            {/* Tabs */}
             <div className="bg-gray-100 p-1 rounded-lg border border-gray-300 flex">
               <button
                 onClick={() => setActiveTab("scope")}
@@ -374,13 +423,25 @@ export default function HandoverWorkspace() {
               </button>
             </div>
 
-            {/* Submit Button */}
-            {role !== "production" && handover.status === "Draft" && (
+            {/* Always Visible Submit / Status Button */}
+            {handover.status === "Draft" ? (
               <button
                 onClick={handleSubmitToBackend}
-                className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition"
+                className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5"
               >
                 🚀 Submit to Backend Team
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (window.confirm("Revert this handover back to Draft for editing?")) {
+                    updateDoc(doc(db, "handovers", handoverId), { status: "Draft" });
+                    setHandover((prev: any) => ({ ...prev, status: "Draft" }));
+                  }
+                }}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs"
+              >
+                ✓ Submitted (Click to Reopen Draft)
               </button>
             )}
           </div>
@@ -388,12 +449,11 @@ export default function HandoverWorkspace() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 mt-6">
-        {/* VIEW 1: EVENT SCOPE BUILDER */}
         {activeTab === "scope" && (
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
             {/* Left Sidebar: Days & Sub-Events Navigation */}
             <div className="md:col-span-4 space-y-4">
-              {/* Days List */}
+              {/* 1. Days Card */}
               <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3">
                 <div className="flex justify-between items-center border-b pb-2">
                   <h3 className="font-black text-sm uppercase text-gray-900">1. Wedding Days</h3>
@@ -408,38 +468,58 @@ export default function HandoverWorkspace() {
                       <option value="Day Two">Day Two</option>
                       <option value="Day Three">Day Three</option>
                       <option value="Day Four">Day Four</option>
+                      <option value="Day Five">Day Five</option>
                     </select>
                     <button
                       onClick={handleAddDay}
-                      className="bg-black text-white px-2 py-1 rounded text-xs font-black"
+                      className="bg-black text-white px-2.5 py-1 rounded text-xs font-black"
                     >
                       + Add
                     </button>
                   </div>
                 </div>
 
-                {/* Day Buttons */}
-                <div className="flex flex-wrap gap-1.5">
+                {/* Day Buttons List with Remove Day option */}
+                <div className="space-y-1.5">
                   {handover.days?.map((d: any, idx: number) => (
-                    <button
+                    <div
                       key={idx}
-                      onClick={() => {
-                        setSelectedDayIndex(idx);
-                        setSelectedEventIndex(0);
-                      }}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                      className={`flex justify-between items-center px-3 py-2 rounded-lg border-2 transition ${
                         selectedDayIndex === idx
                           ? "bg-purple-700 text-white border-purple-800 shadow"
-                          : "bg-gray-100 text-gray-800 border-gray-300"
+                          : "bg-gray-50 text-gray-800 border-gray-200"
                       }`}
                     >
-                      {d.dayName} ({d.events?.length || 0})
-                    </button>
+                      <button
+                        onClick={() => {
+                          setSelectedDayIndex(idx);
+                          setSelectedEventIndex(0);
+                        }}
+                        className="font-black text-xs text-left flex-1"
+                      >
+                        {d.dayName} ({d.events?.length || 0} events)
+                      </button>
+
+                      {/* Remove Day Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDay(idx)}
+                        title="Delete Day"
+                        className={`text-xs font-black px-1.5 py-0.5 rounded hover:bg-red-600 hover:text-white ${
+                          selectedDayIndex === idx ? "text-purple-200" : "text-red-600"
+                        }`}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ))}
+                  {(!handover.days || handover.days.length === 0) && (
+                    <p className="text-xs text-gray-500 italic">No days added yet. Click "+ Add" above.</p>
+                  )}
                 </div>
               </div>
 
-              {/* Events under Selected Day */}
+              {/* 2. Sub-Events on Selected Day */}
               {currentDay && (
                 <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3">
                   <div className="border-b pb-2">
@@ -448,14 +528,22 @@ export default function HandoverWorkspace() {
                     </h3>
                   </div>
 
-                  {/* Add Event Form */}
+                  {/* Add Sub-Event Form (With Custom Event Name Support) */}
                   <div className="bg-gray-50 p-3 rounded-lg border space-y-2 text-xs">
-                    <p className="font-bold text-gray-700">Add Sub-Event:</p>
-                    <div className="grid grid-cols-2 gap-2">
+                    <p className="font-bold text-gray-800">Add Sub-Event:</p>
+                    
+                    <div className="space-y-1.5">
                       <select
-                        value={newEventName}
-                        onChange={(e) => setNewEventName(e.target.value)}
-                        className="border p-1.5 rounded font-bold bg-white"
+                        value={isCustomEventName ? "custom" : newEventName}
+                        onChange={(e) => {
+                          if (e.target.value === "custom") {
+                            setIsCustomEventName(true);
+                          } else {
+                            setIsCustomEventName(false);
+                            setNewEventName(e.target.value);
+                          }
+                        }}
+                        className="w-full border-2 border-gray-400 p-1.5 rounded font-bold bg-white"
                       >
                         <option value="Welcome Lunch">Welcome Lunch</option>
                         <option value="Mehendi">Mehendi</option>
@@ -463,80 +551,111 @@ export default function HandoverWorkspace() {
                         <option value="Sangeet">Sangeet</option>
                         <option value="Baraat & Wedding">Baraat & Wedding</option>
                         <option value="Reception">Reception</option>
-                        <option value="After Party">After Party</option>
                         <option value="Pool Party">Pool Party</option>
+                        <option value="After Party">After Party</option>
+                        <option value="custom" className="text-purple-700 font-black">+ Custom Event...</option>
                       </select>
+
+                      {isCustomEventName && (
+                        <input
+                          required
+                          placeholder="Type Custom Event Name (e.g. Sufi Night, Carnival)"
+                          value={customEventInput}
+                          onChange={(e) => setCustomEventInput(e.target.value)}
+                          className="w-full border-2 border-purple-500 p-1.5 rounded font-bold bg-white text-purple-950"
+                        />
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
                       <input
                         placeholder="Location in resort"
                         value={newEventLocation}
                         onChange={(e) => setNewEventLocation(e.target.value)}
                         className="border p-1.5 rounded font-medium bg-white"
                       />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
                       <input
                         placeholder="Setup ready by (e.g. 3 PM)"
                         value={newEventReadyTime}
                         onChange={(e) => setNewEventReadyTime(e.target.value)}
                         className="border p-1.5 rounded font-medium bg-white"
                       />
-                      <button
-                        onClick={handleAddEvent}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded"
-                      >
-                        + Add Event
-                      </button>
                     </div>
+
+                    <button
+                      onClick={handleAddEvent}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-2 rounded text-xs"
+                    >
+                      + Add Event to {currentDay.dayName}
+                    </button>
                   </div>
 
-                  {/* Events List */}
+                  {/* Sub-Events List with Remove Event Option */}
                   <div className="space-y-1.5">
                     {currentDay.events?.map((ev: any, idx: number) => (
                       <div
                         key={idx}
-                        onClick={() => setSelectedEventIndex(idx)}
-                        className={`p-3 rounded-lg border-2 cursor-pointer transition flex justify-between items-center ${
+                        className={`p-2.5 rounded-lg border-2 transition flex justify-between items-center ${
                           selectedEventIndex === idx
                             ? "bg-purple-50 border-purple-600"
                             : "bg-white border-gray-200 hover:bg-gray-50"
                         }`}
                       >
-                        <div>
+                        <div
+                          onClick={() => setSelectedEventIndex(idx)}
+                          className="cursor-pointer flex-1"
+                        >
                           <p className="font-black text-sm text-gray-900">{ev.eventName}</p>
-                          <p className="text-xs text-gray-500 font-semibold">
-                            📍 {ev.locationInResort || "No location set"}
+                          <p className="text-[11px] text-gray-500 font-semibold">
+                            📍 {ev.locationInResort || "Location not set"} | ⏰ {ev.setupReadyTime || "Time TBD"}
                           </p>
                         </div>
-                        <span className="text-xs font-mono font-bold text-purple-700">
-                          {ev.decorComponents?.length || 0} Decor | {ev.entertainmentElements?.length || 0} SFX
-                        </span>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                            {ev.decorComponents?.length || 0} Decor
+                          </span>
+                          {/* Remove Event Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEvent(idx)}
+                            title="Delete Event"
+                            className="text-red-600 hover:bg-red-50 p-1 rounded font-bold text-xs"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </div>
                     ))}
+
+                    {(!currentDay.events || currentDay.events.length === 0) && (
+                      <p className="text-xs text-gray-400 italic">No events on this day yet.</p>
+                    )}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Right Main Area: Decor & Entertainment Scope for the Selected Event */}
+            {/* Right Main Area: Event Scopes */}
             <div className="md:col-span-8">
               {currentEvent ? (
                 <div className="bg-white rounded-xl border-2 border-gray-300 p-6 space-y-6 shadow-sm">
-                  {/* Event Top Bar */}
+                  {/* Event Top Header */}
                   <div className="border-b pb-4 flex flex-col md:flex-row md:items-center justify-between gap-2">
                     <div>
                       <span className="text-xs font-black uppercase text-purple-700 tracking-wider">
                         {currentDay.dayName} &gt; {currentEvent.eventName}
                       </span>
                       <h2 className="text-2xl font-black text-gray-900">
-                        {currentEvent.eventName} Scope & Specification
+                        {currentEvent.eventName} Scope & Specifications
                       </h2>
                       <p className="text-xs font-bold text-gray-600 mt-0.5">
-                        📍 Venue: <span className="text-black">{currentEvent.locationInResort || "Not specified"}</span> | ⏰ Setup Ready By:{" "}
+                        📍 Venue: <span className="text-black">{currentEvent.locationInResort || "TBD"}</span> | ⏰ Setup Ready:{" "}
                         <span className="text-black">{currentEvent.setupReadyTime || "TBD"}</span>
                       </p>
                     </div>
 
-                    {/* Scope Tabs: Decor vs Entertainment */}
+                    {/* Scope Tabs */}
                     <div className="flex bg-gray-100 p-1 rounded-lg border">
                       <button
                         onClick={() => setEventScopeTab("decor")}
@@ -557,21 +676,26 @@ export default function HandoverWorkspace() {
                     </div>
                   </div>
 
-                  {/* Color Theme Selector Section */}
+                  {/* Color Theme Selector with Swatches & Delete Swatch */}
                   <div className="bg-amber-50/60 p-3.5 rounded-xl border-2 border-amber-200 space-y-2">
-                    <p className="text-xs font-black text-amber-950 uppercase">🎨 Event Color Palette & Theme:</p>
-                    
-                    {/* Selected Colors Badges */}
+                    <p className="text-xs font-black text-amber-950 uppercase">🎨 Event Color Palette & Themes:</p>
+
                     <div className="flex flex-wrap gap-2">
                       {currentEvent.colorThemes?.map((ct: any, idx: number) => (
                         <div key={idx} className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-full border shadow-sm text-xs font-bold">
                           <span className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: ct.hex }} />
                           <span>{ct.role}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteColorTheme(idx)}
+                            className="text-red-500 hover:text-red-700 font-black ml-1 text-xs"
+                          >
+                            ✕
+                          </button>
                         </div>
                       ))}
                     </div>
 
-                    {/* Color Input */}
                     <div className="flex items-center gap-2 pt-1">
                       <input
                         type="color"
@@ -600,7 +724,7 @@ export default function HandoverWorkspace() {
                       {/* Form: Add Component to Scope */}
                       <div className="bg-slate-50 p-4 rounded-xl border-2 border-slate-300 space-y-3">
                         <h4 className="font-black text-xs uppercase text-slate-800">
-                          + Add Decor Component to {currentEvent.eventName} Scope:
+                          + Add Decor Component to {currentEvent.eventName}:
                         </h4>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -623,7 +747,7 @@ export default function HandoverWorkspace() {
                           <div>
                             <label className="block text-xs font-black text-gray-700 mb-1">Placement / Location in Venue</label>
                             <input
-                              placeholder="e.g. Lawn Stage Center, Main Arch Entrance"
+                              placeholder="e.g. Lawn Center, Main Arch Gate"
                               value={compPlacement}
                               onChange={(e) => setCompPlacement(e.target.value)}
                               className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
@@ -657,21 +781,21 @@ export default function HandoverWorkspace() {
                           <label className="block text-xs font-black text-gray-700 mb-1">Specific Client Changes / Written Notes</label>
                           <textarea
                             rows={2}
-                            placeholder="e.g. Bride requested extra hanging bells from the top arch. Extra lights required on stage left."
+                            placeholder="e.g. Bride requested hanging bells from the arch. Extra truss weight needed."
                             value={compClientChanges}
                             onChange={(e) => setCompClientChanges(e.target.value)}
                             className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
                           />
                         </div>
 
-                        {/* Audio Note for this component */}
+                        {/* Audio Note */}
                         <div className="flex items-center gap-3 bg-purple-50 p-2.5 rounded-lg border border-purple-200">
                           <span className="text-xs font-black text-purple-900">🎙️ Audio Note:</span>
                           {!isRecording ? (
                             <button
                               type="button"
                               onClick={startRecording}
-                              className="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs"
+                              className="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs shadow"
                             >
                               🔴 Record
                             </button>
@@ -684,7 +808,7 @@ export default function HandoverWorkspace() {
                               ⏹️ Stop
                             </button>
                           )}
-                          {compAudioFile && <span className="text-xs text-green-700 font-bold">✅ Audio attached</span>}
+                          {compAudioFile && <span className="text-xs text-green-700 font-bold">✅ Audio recorded & attached</span>}
                         </div>
 
                         <button
@@ -692,18 +816,18 @@ export default function HandoverWorkspace() {
                           onClick={handleAddDecorComponent}
                           className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow"
                         >
-                          + Add Component to Handover
+                          + Add Component to Event Scope
                         </button>
                       </div>
 
-                      {/* Attached Decor Components List */}
+                      {/* Attached Decor Components with Remove Button */}
                       <div className="space-y-3">
                         <h4 className="font-black text-sm text-gray-900">
-                          Confirmed Decor Items for {currentEvent.eventName} ({currentEvent.decorComponents?.length || 0}):
+                          Decor Scope for {currentEvent.eventName} ({currentEvent.decorComponents?.length || 0}):
                         </h4>
 
                         {currentEvent.decorComponents?.map((item: any, idx: number) => (
-                          <div key={idx} className="bg-white border-2 border-gray-300 rounded-xl p-4 space-y-2">
+                          <div key={idx} className="bg-white border-2 border-gray-300 rounded-xl p-4 space-y-2 relative">
                             <div className="flex justify-between items-start">
                               <div>
                                 <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">
@@ -714,9 +838,21 @@ export default function HandoverWorkspace() {
                                   📍 Placement: {item.placement || "Venue Area"}
                                 </p>
                               </div>
-                              <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">
-                                {item.code}
-                              </span>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">
+                                  {item.code}
+                                </span>
+
+                                {/* REMOVE COMPONENT BUTTON */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDecorComponent(idx)}
+                                  className="bg-red-50 text-red-700 border border-red-300 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold"
+                                >
+                                  Remove
+                                </button>
+                              </div>
                             </div>
 
                             <div className="bg-gray-50 p-2.5 rounded-lg border text-xs font-medium space-y-1">
@@ -733,6 +869,10 @@ export default function HandoverWorkspace() {
                             )}
                           </div>
                         ))}
+
+                        {(!currentEvent.decorComponents || currentEvent.decorComponents.length === 0) && (
+                          <p className="text-xs text-gray-400 italic">No decor components added to this event yet.</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -740,10 +880,9 @@ export default function HandoverWorkspace() {
                   {/* TAB 2: ENTERTAINMENT & SFX */}
                   {eventScopeTab === "entertainment" && (
                     <div className="space-y-6">
-                      {/* Form: Add Entertainment to Scope */}
                       <div className="bg-purple-50/50 p-4 rounded-xl border-2 border-purple-200 space-y-3">
                         <h4 className="font-black text-xs uppercase text-purple-900">
-                          + Add Audio / SFX / Entertainment to {currentEvent.eventName}:
+                          + Add Audio / SFX / Entertainment:
                         </h4>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -766,7 +905,6 @@ export default function HandoverWorkspace() {
                             </select>
                           </div>
 
-                          {/* Variant Selector (if item has variants) */}
                           {selectedEntId && (
                             <div>
                               <label className="block text-xs font-black text-gray-700 mb-1">Select Brand / Variant</label>
@@ -807,7 +945,7 @@ export default function HandoverWorkspace() {
                         </button>
                       </div>
 
-                      {/* Attached Entertainment List */}
+                      {/* Attached Entertainment with Remove Button */}
                       <div className="space-y-2">
                         {currentEvent.entertainmentElements?.map((item: any, idx: number) => (
                           <div key={idx} className="bg-white border-2 border-gray-200 p-3 rounded-lg flex justify-between items-center text-xs">
@@ -817,9 +955,20 @@ export default function HandoverWorkspace() {
                               </span>
                               {item.notes && <p className="text-gray-600 mt-0.5">Note: {item.notes}</p>}
                             </div>
-                            <span className="font-black text-blue-700">
-                              ₹{item.price?.toLocaleString()} / {item.pricingUnit}
-                            </span>
+
+                            <div className="flex items-center gap-3">
+                              <span className="font-black text-blue-700">
+                                ₹{item.price?.toLocaleString()} / {item.pricingUnit}
+                              </span>
+                              {/* REMOVE ENTERTAINMENT BUTTON */}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteEntertainment(idx)}
+                                className="text-red-600 hover:bg-red-50 px-2 py-1 rounded font-bold border border-red-200"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -835,7 +984,7 @@ export default function HandoverWorkspace() {
           </div>
         )}
 
-        {/* VIEW 2: REAL-TIME DISCUSSION & QUESTIONS TRAIL */}
+        {/* VIEW 2: DISCUSSION TRAIL */}
         {activeTab === "discussion" && (
           <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-6">
             <div className="border-b pb-3">
@@ -845,7 +994,6 @@ export default function HandoverWorkspace() {
               </p>
             </div>
 
-            {/* Comments Stream */}
             <div className="space-y-4 max-h-[500px] overflow-y-auto p-2">
               {comments.map((c) => (
                 <div key={c.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg text-xs space-y-1">
@@ -856,7 +1004,9 @@ export default function HandoverWorkspace() {
                         {c.role}
                       </span>
                     </div>
-                    <span className="text-[10px] text-gray-400">{new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="text-[10px] text-gray-400">
+                      {new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
                   <p className="text-sm font-medium text-gray-800">{c.message}</p>
                 </div>
@@ -867,7 +1017,6 @@ export default function HandoverWorkspace() {
               )}
             </div>
 
-            {/* Comment Form */}
             <form onSubmit={handleSendComment} className="flex gap-2 border-t pt-4">
               <input
                 required
