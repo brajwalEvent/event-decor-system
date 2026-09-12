@@ -41,6 +41,7 @@ export default function ComponentsPage() {
 
   // Base Info
   const [name, setName] = useState("");
+  const [code, setCode] = useState(""); // Auto generated component code
   const [category, setCategory] = useState("Stages");
   const [baseCost, setBaseCost] = useState<number>(0);
   const [length, setLength] = useState("");
@@ -68,12 +69,14 @@ export default function ComponentsPage() {
   const [freshItemQty, setFreshItemQty] = useState("");
   const [freshItemCost, setFreshItemCost] = useState<number>(0);
 
-  // 3. Vendor Rentals
+  // 3. Vendor Rentals (Item Name, Quantity, Size, Vendor Details, Cost)
   const [vendorRentals, setVendorRentals] = useState<
-    { item: string; details: string; estimatedCost: number }[]
+    { item: string; quantity: number; size: string; vendorDetails: string; estimatedCost: number }[]
   >([]);
   const [rentalItemName, setRentalItemName] = useState("");
-  const [rentalDetails, setRentalDetails] = useState("");
+  const [rentalQty, setRentalQty] = useState<number>(1);
+  const [rentalSize, setRentalSize] = useState("");
+  const [rentalVendorDetails, setRentalVendorDetails] = useState("");
   const [rentalCost, setRentalCost] = useState<number>(0);
 
   // 4. Instructions & Assembly Steps
@@ -99,20 +102,25 @@ export default function ComponentsPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // SKU / Code generator helper
+  const generateComponentCode = (catName: string) => {
+    const clean = catName.replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase() || "CMP";
+    const random = Math.floor(1000 + Math.random() * 9000);
+    return `${clean}-${random}`;
+  };
+
   // Auth Guard
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Fetch Components & Available Elements from Warehouse
+  // Fetch Data
   const fetchData = async () => {
     try {
-      // 1. Get Components
       const compQ = query(collection(db, "components"), orderBy("createdAt", "desc"));
       const compSnap = await getDocs(compQ);
       setComponentsList(compSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      // 2. Get Elements for the picker
       const elemQ = query(collection(db, "elements"), orderBy("name", "asc"));
       const elemSnap = await getDocs(elemQ);
       setWarehouseElements(elemSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -125,7 +133,7 @@ export default function ComponentsPage() {
     if (user) fetchData();
   }, [user]);
 
-  // Handle Event Tag Toggle
+  // Event Tag Toggle
   const toggleEventTag = (tag: string) => {
     if (selectedEvents.includes(tag)) {
       setSelectedEvents(selectedEvents.filter((t) => t !== tag));
@@ -134,7 +142,7 @@ export default function ComponentsPage() {
     }
   };
 
-  // Add Warehouse Element item
+  // Add Warehouse Element
   const handleAddWarehouseElement = () => {
     if (!currentElemId) return;
     const found = warehouseElements.find((e) => e.id === currentElemId);
@@ -154,7 +162,7 @@ export default function ComponentsPage() {
     setCurrentElemNotes("");
   };
 
-  // Add Fresh Purchase Item
+  // Add Fresh Purchase
   const handleAddFreshItem = () => {
     if (!freshItemName.trim()) return;
     setFreshPurchases([
@@ -170,19 +178,23 @@ export default function ComponentsPage() {
     setFreshItemCost(0);
   };
 
-  // Add Vendor Rental Item
+  // Add Vendor Rental (With Qty, Size, Details & Cost)
   const handleAddRental = () => {
     if (!rentalItemName.trim()) return;
     setVendorRentals([
       ...vendorRentals,
       {
         item: rentalItemName.trim(),
-        details: rentalDetails.trim(),
+        quantity: Number(rentalQty) || 1,
+        size: rentalSize.trim(),
+        vendorDetails: rentalVendorDetails.trim(),
         estimatedCost: Number(rentalCost) || 0,
       },
     ]);
     setRentalItemName("");
-    setRentalDetails("");
+    setRentalQty(1);
+    setRentalSize("");
+    setRentalVendorDetails("");
     setRentalCost(0);
   };
 
@@ -209,7 +221,7 @@ export default function ComponentsPage() {
     setVariationCost(0);
   };
 
-  // Voice recording
+  // Audio Recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -251,6 +263,7 @@ export default function ComponentsPage() {
   const resetForm = () => {
     setName("");
     setCategory("Stages");
+    setCode(generateComponentCode("Stages"));
     setIsCustomCategory(false);
     setCustomCategoryInput("");
     setBaseCost(0);
@@ -262,6 +275,11 @@ export default function ComponentsPage() {
     setSelectedWarehouseElements([]);
     setFreshPurchases([]);
     setVendorRentals([]);
+    setRentalItemName("");
+    setRentalQty(1);
+    setRentalSize("");
+    setRentalVendorDetails("");
+    setRentalCost(0);
     setWrittenInstructions("");
     setSteps([]);
     setVariations([]);
@@ -276,6 +294,7 @@ export default function ComponentsPage() {
     setIsEditing(true);
     setEditId(item.id);
     setName(item.name || "");
+    setCode(item.code || generateComponentCode(item.category || "Stages"));
     setCategory(item.category || "Stages");
     setIsCustomCategory(false);
     setBaseCost(item.baseCost || 0);
@@ -286,7 +305,17 @@ export default function ComponentsPage() {
     setSelectedEvents(item.events || []);
     setSelectedWarehouseElements(item.warehouseElements || []);
     setFreshPurchases(item.freshPurchases || []);
-    setVendorRentals(item.vendorRentals || []);
+
+    // Load rentals with support for older records
+    const mappedRentals = (item.vendorRentals || []).map((r: any) => ({
+      item: r.item || "",
+      quantity: r.quantity || 1,
+      size: r.size || "",
+      vendorDetails: r.vendorDetails || r.details || "",
+      estimatedCost: r.estimatedCost || 0,
+    }));
+    setVendorRentals(mappedRentals);
+
     setWrittenInstructions(item.writtenInstructions || "");
     setSteps(item.steps || []);
     setVariations(item.variations || []);
@@ -335,6 +364,7 @@ export default function ComponentsPage() {
 
       const componentData = {
         name,
+        code,
         category: finalCategory,
         baseCost: Number(baseCost) || 0,
         dimensions: {
@@ -380,12 +410,12 @@ export default function ComponentsPage() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Top Header */}
+        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border-2 border-gray-300 shadow-sm mb-8">
           <div>
             <h1 className="text-3xl font-black text-gray-900">Components Master Library</h1>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Assemble stages, entry gates, canopies with warehouse props, fresh buys, rentals & production steps.
+              Assemble stages, entry gates, canopies with warehouse props, fresh buys, rentals & steps.
             </p>
           </div>
           {role !== "sales" && (
@@ -419,9 +449,16 @@ export default function ComponentsPage() {
                       No Component Photos
                     </div>
                   )}
+
+                  {/* Component Code Badge */}
+                  <span className="absolute top-2 left-2 bg-gray-900 text-white text-xs font-mono font-black px-2.5 py-1 rounded shadow">
+                    {comp.code || "COMP"}
+                  </span>
+
                   <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded shadow">
                     ₹{comp.baseCost?.toLocaleString() || "0"}
                   </span>
+
                   {comp.images?.length > 1 && (
                     <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs font-bold px-2 py-0.5 rounded">
                       +{comp.images.length - 1} more photos
@@ -454,13 +491,13 @@ export default function ComponentsPage() {
                     </div>
                   )}
 
-                  {/* Warehouse Elements Count */}
+                  {/* Counts Breakdown */}
                   <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-lg text-xs font-semibold text-gray-700 space-y-1">
                     <p>
                       📦 <strong>Warehouse Props:</strong> {comp.warehouseElements?.length || 0} items attached
                     </p>
                     <p>
-                      🌸 <strong>Fresh Buys (Flowers/etc):</strong> {comp.freshPurchases?.length || 0} items
+                      🌸 <strong>Fresh Buys:</strong> {comp.freshPurchases?.length || 0} items
                     </p>
                     <p>
                       🚚 <strong>Vendor Rentals:</strong> {comp.vendorRentals?.length || 0} items
@@ -501,15 +538,6 @@ export default function ComponentsPage() {
           ))}
         </div>
 
-        {componentsList.length === 0 && (
-          <div className="text-center py-16 bg-white border-2 border-dashed border-gray-300 rounded-xl">
-            <p className="text-gray-600 font-bold text-lg">No components created yet.</p>
-            <p className="text-gray-400 text-sm mt-1">
-              Click "+ Create New Component" to assemble your first Stage, Gate, or Canopy.
-            </p>
-          </div>
-        )}
-
         {/* Modal: Create or Edit Component */}
         {showModal && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
@@ -527,7 +555,7 @@ export default function ComponentsPage() {
               </div>
 
               <form onSubmit={handleSave} className="space-y-6">
-                {/* 1. Component Basics */}
+                {/* 1. Basics */}
                 <div className="space-y-4">
                   <h3 className="font-black text-blue-700 text-sm tracking-wide uppercase border-b pb-1">
                     1. General Information
@@ -544,16 +572,19 @@ export default function ComponentsPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* Category */}
                     <div>
                       <label className="block text-sm font-black text-gray-800 mb-1">Category</label>
                       <select
                         value={isCustomCategory ? "custom" : category}
                         onChange={(e) => {
-                          if (e.target.value === "custom") setIsCustomCategory(true);
-                          else {
+                          if (e.target.value === "custom") {
+                            setIsCustomCategory(true);
+                          } else {
                             setIsCustomCategory(false);
                             setCategory(e.target.value);
+                            if (!isEditing) setCode(generateComponentCode(e.target.value));
                           }
                         }}
                         className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900"
@@ -561,12 +592,33 @@ export default function ComponentsPage() {
                         {categories.map((cat) => (
                           <option key={cat} value={cat}>{cat}</option>
                         ))}
-                        <option value="custom" className="text-blue-700 font-black">+ Add Custom Category...</option>
+                        <option value="custom" className="text-blue-700 font-black">+ Add Custom...</option>
                       </select>
                     </div>
 
+                    {/* Auto Code */}
                     <div>
-                      <label className="block text-sm font-black text-gray-800 mb-1">Estimated Base Cost (₹)</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-sm font-black text-gray-800">Code (Auto)</label>
+                        <button
+                          type="button"
+                          onClick={() => setCode(generateComponentCode(isCustomCategory ? customCategoryInput : category))}
+                          className="text-xs text-blue-700 font-bold hover:underline"
+                        >
+                          🔄 Re-generate
+                        </button>
+                      </div>
+                      <input
+                        required
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        className="w-full border-2 border-gray-400 bg-gray-100 p-2.5 rounded-lg font-mono font-bold text-gray-900"
+                      />
+                    </div>
+
+                    {/* Cost */}
+                    <div>
+                      <label className="block text-sm font-black text-gray-800 mb-1">Estimated Cost (₹)</label>
                       <input
                         type="number"
                         placeholder="85000"
@@ -584,13 +636,16 @@ export default function ComponentsPage() {
                         required
                         placeholder="e.g. Photo Booths, Floral Mandaps"
                         value={customCategoryInput}
-                        onChange={(e) => setCustomCategoryInput(e.target.value)}
+                        onChange={(e) => {
+                          setCustomCategoryInput(e.target.value);
+                          if (!isEditing) setCode(generateComponentCode(e.target.value));
+                        }}
                         className="w-full border-2 border-blue-400 bg-white p-2 rounded font-bold text-gray-900"
                       />
                     </div>
                   )}
 
-                  {/* Overall Dimensions */}
+                  {/* Dimensions */}
                   <div>
                     <label className="block text-sm font-black text-gray-800 mb-1">Overall Dimensions (L × W × H)</label>
                     <div className="grid grid-cols-4 gap-2">
@@ -605,7 +660,7 @@ export default function ComponentsPage() {
                     </div>
                   </div>
 
-                  {/* Applicable Events */}
+                  {/* Events */}
                   <div>
                     <label className="block text-sm font-black text-gray-800 mb-1">Applicable Events (Optional)</label>
                     <div className="flex flex-wrap gap-2">
@@ -628,7 +683,7 @@ export default function ComponentsPage() {
                   </div>
                 </div>
 
-                {/* 2. Photos of the whole component */}
+                {/* 2. Photos */}
                 <div className="space-y-2 bg-slate-50 p-4 rounded-xl border-2 border-slate-300">
                   <label className="block text-sm font-black text-gray-900">
                     📸 Component Reference Photos (Select multiple)
@@ -647,7 +702,7 @@ export default function ComponentsPage() {
                   )}
                 </div>
 
-                {/* 3. Assign Warehouse Elements */}
+                {/* 3. Warehouse Props */}
                 <div className="space-y-3 bg-amber-50/50 p-4 rounded-xl border-2 border-amber-300">
                   <h3 className="font-black text-amber-900 text-sm tracking-wide uppercase">
                     2. Assign Warehouse Elements (From Your Prop Library)
@@ -700,7 +755,6 @@ export default function ComponentsPage() {
                     </div>
                   </div>
 
-                  {/* Attached Elements List */}
                   {selectedWarehouseElements.length > 0 && (
                     <div className="space-y-1 mt-2">
                       {selectedWarehouseElements.map((item, idx) => (
@@ -722,7 +776,7 @@ export default function ComponentsPage() {
                   )}
                 </div>
 
-                {/* 4. Fresh Purchases (Bought New Every Time) */}
+                {/* 4. Fresh Consumables */}
                 <div className="space-y-3 bg-green-50/50 p-4 rounded-xl border-2 border-green-300">
                   <h3 className="font-black text-green-900 text-sm tracking-wide uppercase">
                     3. Fresh Purchases (Flowers, Prints, Consumables)
@@ -739,7 +793,7 @@ export default function ComponentsPage() {
                     </div>
                     <div className="md:col-span-3">
                       <input
-                        placeholder="Qty/Size (e.g. 100 kgs / 24x10 ft)"
+                        placeholder="Qty/Description (e.g. 50 kg)"
                         value={freshItemQty}
                         onChange={(e) => setFreshItemQty(e.target.value)}
                         className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-sm bg-white"
@@ -785,60 +839,100 @@ export default function ComponentsPage() {
                   )}
                 </div>
 
-                {/* 5. Vendor Rentals */}
+                {/* 5. Vendor Rentals (NEW: With Qty, Size, Vendor Details & Cost) */}
                 <div className="space-y-3 bg-indigo-50/50 p-4 rounded-xl border-2 border-indigo-300">
                   <h3 className="font-black text-indigo-900 text-sm tracking-wide uppercase">
-                    4. Vendor Rentals (Trussing, LED Wall, Carpets)
+                    4. Vendor Rentals (Trussing, LED Wall, Sound, Carpets)
                   </h3>
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                    <div className="md:col-span-5">
+                    {/* Item Name */}
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-black text-gray-700 mb-0.5">Item Name *</label>
                       <input
-                        placeholder="Rental Item (e.g. Heavy Duty Truss, P3 LED Wall)"
+                        placeholder="e.g. Heavy Duty Truss"
                         value={rentalItemName}
                         onChange={(e) => setRentalItemName(e.target.value)}
-                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-sm bg-white"
+                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
                       />
                     </div>
-                    <div className="md:col-span-3">
-                      <input
-                        placeholder="Specs / Vendor details"
-                        value={rentalDetails}
-                        onChange={(e) => setRentalDetails(e.target.value)}
-                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-sm bg-white"
-                      />
-                    </div>
+
+                    {/* Quantity */}
                     <div className="md:col-span-2">
+                      <label className="block text-xs font-black text-gray-700 mb-0.5">Quantity *</label>
                       <input
                         type="number"
-                        placeholder="Cost (₹)"
-                        value={rentalCost || ""}
-                        onChange={(e) => setRentalCost(Number(e.target.value))}
-                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-sm bg-white"
+                        min="1"
+                        placeholder="Qty"
+                        value={rentalQty}
+                        onChange={(e) => setRentalQty(Number(e.target.value))}
+                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white text-center"
                       />
                     </div>
+
+                    {/* Size */}
                     <div className="md:col-span-2">
-                      <button
-                        type="button"
-                        onClick={handleAddRental}
-                        className="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold p-2 rounded-lg text-sm"
-                      >
-                        + Add Rental
-                      </button>
+                      <label className="block text-xs font-black text-gray-700 mb-0.5">Size (Optional)</label>
+                      <input
+                        placeholder="e.g. 24x16 ft / 12 inch"
+                        value={rentalSize}
+                        onChange={(e) => setRentalSize(e.target.value)}
+                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                      />
+                    </div>
+
+                    {/* Vendor Detail */}
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-black text-gray-700 mb-0.5">Vendor Detail / Contact</label>
+                      <input
+                        placeholder="e.g. Ramesh Sound (+91 98...)"
+                        value={rentalVendorDetails}
+                        onChange={(e) => setRentalVendorDetails(e.target.value)}
+                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                      />
+                    </div>
+
+                    {/* Cost */}
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-black text-gray-700 mb-0.5">Cost (₹)</label>
+                      <input
+                        type="number"
+                        placeholder="Cost"
+                        value={rentalCost || ""}
+                        onChange={(e) => setRentalCost(Number(e.target.value))}
+                        className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
+                      />
                     </div>
                   </div>
 
+                  {/* Add Button */}
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleAddRental}
+                      className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-4 py-2 rounded-lg text-xs shadow"
+                    >
+                      + Add Rental Item
+                    </button>
+                  </div>
+
+                  {/* Rental Items List */}
                   {vendorRentals.length > 0 && (
-                    <div className="space-y-1 mt-2">
+                    <div className="space-y-1.5 mt-2">
                       {vendorRentals.map((vr, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border text-sm">
-                          <span>
-                            🚚 <strong>{vr.item}</strong> - {vr.details} (Est: ₹{vr.estimatedCost})
-                          </span>
+                        <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border text-xs">
+                          <div>
+                            <span className="font-bold text-indigo-900 text-sm">
+                              🚚 {vr.quantity}x {vr.item}
+                            </span>
+                            {vr.size && <span className="ml-2 text-gray-600 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">Size: {vr.size}</span>}
+                            {vr.vendorDetails && <span className="ml-2 text-gray-700">| Vendor: {vr.vendorDetails}</span>}
+                            <span className="ml-2 font-bold text-green-700">₹{vr.estimatedCost}</span>
+                          </div>
                           <button
                             type="button"
                             onClick={() => setVendorRentals(vendorRentals.filter((_, i) => i !== idx))}
-                            className="text-red-600 font-bold hover:underline"
+                            className="text-red-600 font-bold hover:underline ml-2"
                           >
                             Remove
                           </button>
@@ -848,7 +942,7 @@ export default function ComponentsPage() {
                   )}
                 </div>
 
-                {/* 6. Production Steps & Written Instructions */}
+                {/* 6. Execution Steps & Written Notes */}
                 <div className="space-y-3">
                   <h3 className="font-black text-gray-800 text-sm tracking-wide uppercase border-b pb-1">
                     5. Execution Steps & Production Instructions
@@ -898,7 +992,7 @@ export default function ComponentsPage() {
                     </label>
                     <textarea
                       rows={3}
-                      placeholder="e.g. Wind ballast weights required if outdoors. Fresh flowers must be mounted only 2 hours before event start."
+                      placeholder="e.g. Fresh flowers must be mounted only 2 hours before event start."
                       value={writtenInstructions}
                       onChange={(e) => setWrittenInstructions(e.target.value)}
                       className="w-full border-2 border-gray-400 p-2.5 rounded-lg text-sm font-medium"
@@ -940,7 +1034,7 @@ export default function ComponentsPage() {
                   </div>
                 </div>
 
-                {/* 7. Allowed Variations & Cost Changes */}
+                {/* 7. Deviations & Variations */}
                 <div className="space-y-3 bg-gray-100 p-4 rounded-xl border-2 border-gray-300">
                   <h3 className="font-black text-gray-900 text-sm tracking-wide uppercase">
                     6. Allowed Modifications & Price Deviations
