@@ -8,9 +8,13 @@ import { useAuth } from "../context/AuthContext";
 
 export default function Navbar() {
   const pathname = usePathname();
-  const { user, role } = useAuth();
+  const { user, role, isSuperAdmin } = useAuth();
 
   if (!user) return null;
+
+  const isSales = role === "sales";
+  const isProduction = role === "production";
+  const canAccessProduction = isSuperAdmin || isProduction || role === "admin";
 
   return (
     <header className="bg-gray-900 text-white border-b border-gray-800 sticky top-0 z-40">
@@ -21,6 +25,21 @@ export default function Navbar() {
           </span>
 
           <nav className="flex items-center gap-1 sm:gap-2">
+            {/* 1. SUPER ADMIN EXCLUSIVE TAB */}
+            {isSuperAdmin && (
+              <Link
+                href="/admin/team"
+                className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-black whitespace-nowrap transition ${
+                  pathname === "/admin/team" 
+                    ? "bg-red-600 text-white shadow" 
+                    : "bg-red-950 text-red-200 hover:bg-red-900"
+                }`}
+              >
+                👑 Team Management
+              </Link>
+            )}
+
+            {/* 2. WEDDING HANDOVERS (Visible to Everyone) */}
             <Link
               href="/handovers"
               className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
@@ -29,38 +48,50 @@ export default function Navbar() {
             >
               📋 Wedding Handovers
             </Link>
-            <Link
-              href="/components"
-              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                pathname === "/components" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
-              }`}
-            >
-              🏛️ Decor Components
-            </Link>
-            <Link
-              href="/entertainment"
-              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                pathname === "/entertainment" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
-              }`}
-            >
-              🎤 Entertainment & SFX
-            </Link>
-            <Link
-              href="/elements"
-              className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
-              }`}
-            >
-              📦 Warehouse Props
-            </Link>
+
+            {/* 3. MASTER LIBRARIES (Visible to Production & Super Admin Only) */}
+            {canAccessProduction && (
+              <>
+                <Link
+                  href="/components"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname === "/components" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                  }`}
+                >
+                  🏛️ Decor Components
+                </Link>
+                <Link
+                  href="/entertainment"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname === "/entertainment" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                  }`}
+                >
+                  🎤 Entertainment & SFX
+                </Link>
+                <Link
+                  href="/elements"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                  }`}
+                >
+                  📦 Warehouse Props
+                </Link>
+              </>
+            )}
           </nav>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="text-right hidden md:block">
-            <p className="text-xs text-gray-400 font-semibold">{user.email}</p>
-            <span className="text-[10px] uppercase font-black bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800">
-              {role}
+            <p className="text-xs text-gray-300 font-semibold">{user.email}</p>
+            <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded border ${
+              isSuperAdmin 
+                ? "bg-red-950 text-red-300 border-red-700" 
+                : isSales 
+                ? "bg-purple-950 text-purple-300 border-purple-800" 
+                : "bg-blue-950 text-blue-300 border-blue-800"
+            }`}>
+              {isSuperAdmin ? "👑 Super Admin" : isSales ? "💼 Front Sales Team" : "🛠️ Production Team"}
             </span>
           </div>
           <button
