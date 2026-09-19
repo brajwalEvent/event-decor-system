@@ -218,17 +218,28 @@ export default function HandoversDashboard() {
                   </div>
                 </div>
 
-                <div className="mt-5 pt-4 border-t border-gray-200 flex items-center justify-between gap-2">
+                <div className="mt-5 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2">
+                  {/* Button 1: Open the workspace to edit */}
                   <Link
                     href={`/handovers/${h.id}`}
-                    className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-2 px-3 rounded-lg text-center text-sm transition"
+                    className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-2 px-3 rounded-lg text-center text-xs transition"
                   >
-                    Open Handover Workspace →
+                    Open Workspace →
                   </Link>
+
+                  {/* Button 2: Direct Presentation Deck & PDF Download */}
+                  <Link
+                    href={`/handovers/${h.id}/presentation`}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-black py-2 px-3 rounded-lg text-center text-xs transition flex items-center gap-1 shadow"
+                  >
+                    📑 PDF & Deck
+                  </Link>
+
+                  {/* Button 3: Admin Delete */}
                   {role === "admin" && (
                     <button
                       onClick={() => handleDeleteHandover(h.id, h.title)}
-                      className="text-red-600 hover:bg-red-50 p-2 rounded text-xs font-bold"
+                      className="text-red-600 hover:bg-red-50 p-2 rounded text-xs font-bold border border-red-200"
                     >
                       Delete
                     </button>

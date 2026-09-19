@@ -484,6 +484,15 @@ export default function HandoverWorkspace() {
               >
                 📋 Scope & Setup
               </button>
+
+{/* PRESENTATION DECK & PDF EXPORT BUTTON */}
+<button
+  onClick={() => router.push(`/handovers/${handoverId}/presentation`)}
+  className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5"
+>
+  📑 Presentation Deck & PDF
+</button>
+
               <button
                 onClick={() => setActiveTab("discussion")}
                 className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1.5 ${
