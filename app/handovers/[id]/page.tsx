@@ -36,6 +36,12 @@ export default function HandoverWorkspace() {
   const [selectedEventIndex, setSelectedEventIndex] = useState<number>(0);
   const [eventScopeTab, setEventScopeTab] = useState<"decor" | "entertainment">("decor");
 
+  // FULL SCREEN COMPONENT PICKER POPUP STATES
+  const [showComponentPickerModal, setShowComponentPickerModal] = useState(false);
+  const [componentPickerCategory, setComponentPickerCategory] = useState("All");
+  const [componentPickerSearch, setComponentPickerSearch] = useState("");
+  const [currentSelectedComponent, setCurrentSelectedComponent] = useState<any | null>(null);
+
   // Day & Event Add States
   const [newDayName, setNewDayName] = useState("Day One");
   const [newEventName, setNewEventName] = useState("Haldi");
@@ -49,7 +55,6 @@ export default function HandoverWorkspace() {
   const [colorRole, setColorRole] = useState("Major Drapery");
 
   // Decor Component Add State
-  const [selectedCompId, setSelectedCompId] = useState("");
   const [compCustomSize, setCompCustomSize] = useState("");
   const [compColorVariation, setCompColorVariation] = useState("");
   const [compPlacement, setCompPlacement] = useState("");
@@ -64,7 +69,7 @@ export default function HandoverWorkspace() {
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [entNotes, setEntNotes] = useState("");
 
-  // Production Remark Modal / Input State
+  // Production Remark Modal State
   const [editingRemarkItem, setEditingRemarkItem] = useState<{ type: 'decor' | 'ent', index: number, currentRemark: string } | null>(null);
   const [remarkText, setRemarkText] = useState("");
 
@@ -75,7 +80,6 @@ export default function HandoverWorkspace() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Fetch Handover & Libraries
   const fetchHandoverAndMasterData = async () => {
     try {
       const hSnap = await getDoc(doc(db, "handovers", handoverId));
@@ -103,20 +107,15 @@ export default function HandoverWorkspace() {
     if (handoverId) fetchHandoverAndMasterData();
   }, [handoverId]);
 
-  // Comments Listener
   useEffect(() => {
     if (!handoverId) return;
-    const q = query(
-      collection(db, "handovers", handoverId, "comments"),
-      orderBy("createdAt", "asc")
-    );
+    const q = query(collection(db, "handovers", handoverId, "comments"), orderBy("createdAt", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setComments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => unsubscribe();
   }, [handoverId]);
 
-  // Audit Logger: Saves modification with who, when, and remark
   const logModification = async (action: string, remark: string) => {
     const logEntry = {
       author: user?.email || "User",
@@ -125,7 +124,6 @@ export default function HandoverWorkspace() {
       remark: remark || "Updated scope details",
       timestamp: new Date().toISOString(),
     };
-
     const currentLogs = handover.auditLogs || [];
     const updatedLogs = [logEntry, ...currentLogs];
 
@@ -133,11 +131,9 @@ export default function HandoverWorkspace() {
       auditLogs: updatedLogs,
       updatedAt: new Date().toISOString(),
     });
-
     setHandover((prev: any) => ({ ...prev, auditLogs: updatedLogs }));
   };
 
-  // Save Handover Days to Database
   const updateHandoverDaysInDb = async (updatedDays: any[], actionText?: string) => {
     try {
       await updateDoc(doc(db, "handovers", handoverId), {
@@ -146,7 +142,6 @@ export default function HandoverWorkspace() {
       });
       setHandover((prev: any) => ({ ...prev, days: updatedDays }));
 
-      // Prompt modification remark if handover is already submitted or in production
       if (handover.status !== "Draft" && actionText) {
         const userRemark = prompt(`Audit Log: Please enter a brief remark for this change (${actionText}):`) || "Scope adjustment";
         await logModification(actionText, userRemark);
@@ -157,7 +152,6 @@ export default function HandoverWorkspace() {
     }
   };
 
-  // Helper: Get list of all components and items for tagging in discussion
   const getAllTaggableItems = () => {
     const list: string[] = [];
     handover?.days?.forEach((day: any) => {
@@ -173,7 +167,7 @@ export default function HandoverWorkspace() {
     return list;
   };
 
-  // Add / Delete Days
+  // Add Day
   const handleAddDay = async () => {
     const updatedDays = [...(handover.days || [])];
     updatedDays.push({ dayName: newDayName, events: [] });
@@ -190,7 +184,7 @@ export default function HandoverWorkspace() {
     setSelectedEventIndex(0);
   };
 
-  // Add / Delete Events
+  // Add Event
   const handleAddEvent = async () => {
     const finalEventName = isCustomEventName ? customEventInput.trim() : newEventName;
     if (!finalEventName) return;
@@ -224,7 +218,7 @@ export default function HandoverWorkspace() {
     setSelectedEventIndex(0);
   };
 
-  // Color Themes
+  // Colors
   const handleAddColorTheme = async () => {
     const updatedDays = [...handover.days];
     const currentEvent = updatedDays[selectedDayIndex]?.events[selectedEventIndex];
@@ -269,11 +263,12 @@ export default function HandoverWorkspace() {
     }
   };
 
-  // Add Decor Component
+  // Attach Chosen Decor Component to Event Scope
   const handleAddDecorComponent = async () => {
-    if (!selectedCompId) return;
-    const master = componentsLibrary.find((c) => c.id === selectedCompId);
-    if (!master) return;
+    if (!currentSelectedComponent) {
+      alert("Please choose a component first using the visual picker.");
+      return;
+    }
 
     let audioUrl = "";
     if (compAudioFile) {
@@ -287,20 +282,21 @@ export default function HandoverWorkspace() {
     if (!currentEvent.decorComponents) currentEvent.decorComponents = [];
 
     currentEvent.decorComponents.push({
-      componentId: master.id,
-      name: master.name,
-      category: master.category,
-      code: master.code || "COMP",
-      customSize: compCustomSize || `${master.dimensions?.length}x${master.dimensions?.width} ${master.dimensions?.unit}`,
+      componentId: currentSelectedComponent.id,
+      name: currentSelectedComponent.name,
+      category: currentSelectedComponent.category,
+      code: currentSelectedComponent.code || "COMP",
+      imageUrl: currentSelectedComponent.images?.[0] || "",
+      customSize: compCustomSize || `${currentSelectedComponent.dimensions?.length}x${currentSelectedComponent.dimensions?.width} ${currentSelectedComponent.dimensions?.unit}`,
       colorVariation: compColorVariation,
       placement: compPlacement,
       clientChanges: compClientChanges,
-      productionRemarks: "", // For backend team remarks
+      productionRemarks: "",
       audioUrl,
     });
 
-    await updateHandoverDaysInDb(updatedDays, `Added Component: ${master.name}`);
-    setSelectedCompId("");
+    await updateHandoverDaysInDb(updatedDays, `Added Component: ${currentSelectedComponent.name}`);
+    setCurrentSelectedComponent(null);
     setCompCustomSize("");
     setCompColorVariation("");
     setCompPlacement("");
@@ -316,7 +312,7 @@ export default function HandoverWorkspace() {
     await updateHandoverDaysInDb(updatedDays, `Removed Component: ${compName}`);
   };
 
-  // Add Entertainment
+  // Attach Entertainment
   const handleAddEntertainment = async () => {
     if (!selectedEntId) return;
     const master = entertainmentLibrary.find((e) => e.id === selectedEntId);
@@ -364,7 +360,7 @@ export default function HandoverWorkspace() {
     await updateHandoverDaysInDb(updatedDays, `Removed Entertainment: ${entName}`);
   };
 
-  // Save Production Remark directly onto a Component or Entertainment item
+  // Production Remark Save
   const handleSaveProductionRemark = async () => {
     if (!editingRemarkItem) return;
     const updatedDays = [...handover.days];
@@ -381,12 +377,11 @@ export default function HandoverWorkspace() {
       `Added Production Remark on ${editingRemarkItem.type === "decor" ? event.decorComponents[editingRemarkItem.index].name : event.entertainmentElements[editingRemarkItem.index].name}`,
       remarkText.trim()
     );
-
     setEditingRemarkItem(null);
     setRemarkText("");
   };
 
-  // Sales Action: Submit to Backend
+  // Submit Handover (Sales)
   const handleSubmitToBackend = async () => {
     if (!window.confirm("Submit this wedding handover to the Backend Production team?")) return;
     await updateDoc(doc(db, "handovers", handoverId), {
@@ -404,10 +399,9 @@ export default function HandoverWorkspace() {
     });
   };
 
-  // Production Action: Approve Handover
+  // Approve Handover (Production)
   const handleApproveHandover = async () => {
     const remark = prompt("Production Approval: Enter any final execution remarks before approving:", "All dimensions and sound specs verified. Approved for setup.") || "Approved for setup";
-    
     await updateDoc(doc(db, "handovers", handoverId), {
       status: "Approved for Production",
       approvedAt: new Date().toISOString(),
@@ -422,10 +416,9 @@ export default function HandoverWorkspace() {
       message: `✅ Handover APPROVED for on-site production! Remarks: ${remark}`,
       createdAt: new Date().toISOString(),
     });
-    alert("🎉 Handover has been officially approved for production!");
   };
 
-  // Send Comment in Trail (With optional Item Tagging)
+  // Send Comment
   const handleSendComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim()) return;
@@ -434,13 +427,22 @@ export default function HandoverWorkspace() {
       author: user?.email || "User",
       role: role || "sales",
       message: newComment.trim(),
-      taggedItem: commentTaggedItem || null, // Item reference
+      taggedItem: commentTaggedItem || null,
       createdAt: new Date().toISOString(),
     });
-
     setNewComment("");
     setCommentTaggedItem("");
   };
+
+  // Distinct Component Categories for the Popup Filter
+  const componentCategories = ["All", ...Array.from(new Set(componentsLibrary.map((c) => c.category).filter(Boolean)))];
+
+  // Filtered Components for Popup Grid
+  const filteredComponents = componentsLibrary.filter((c) => {
+    const matchesCat = componentPickerCategory === "All" || c.category === componentPickerCategory;
+    const matchesSearch = !componentPickerSearch || c.name.toLowerCase().includes(componentPickerSearch.toLowerCase()) || c.code?.toLowerCase().includes(componentPickerSearch.toLowerCase());
+    return matchesCat && matchesSearch;
+  });
 
   if (!handover) return <div className="p-8 text-center text-xl font-bold">Loading Handover Workspace...</div>;
 
@@ -450,7 +452,7 @@ export default function HandoverWorkspace() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 pb-16">
-      {/* Header Bar */}
+      {/* Top Banner */}
       <div className="bg-white border-b-2 border-gray-300 shadow-sm sticky top-16 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -495,20 +497,21 @@ export default function HandoverWorkspace() {
                   </span>
                 )}
               </button>
+
+              {/* STRICTLY SUPER ADMIN EXCLUSIVE */}
               {isSuperAdmin && (
-  <button
-    onClick={() => setActiveTab("audit")}
-    className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1 ${
-      activeTab === "audit" ? "bg-white text-blue-900 shadow" : "text-gray-600"
-    }`}
-  >
-    📜 Audit Log ({handover.auditLogs?.length || 0})
-  </button>
-)}
+                <button
+                  onClick={() => setActiveTab("audit")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1 ${
+                    activeTab === "audit" ? "bg-white text-blue-900 shadow" : "text-gray-600"
+                  }`}
+                >
+                  📜 Audit Log ({handover.auditLogs?.length || 0})
+                </button>
+              )}
             </div>
 
-            {/* Workflow Action Buttons */}
-            {/* 1. Sales Submit Button */}
+            {/* Workflow Buttons */}
             {isSales && handover.status === "Draft" && (
               <button
                 onClick={handleSubmitToBackend}
@@ -518,29 +521,12 @@ export default function HandoverWorkspace() {
               </button>
             )}
 
-            {/* 2. Production Approve Button */}
             {isProductionOrAdmin && handover.status === "Submitted to Backend" && (
               <button
                 onClick={handleApproveHandover}
                 className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5 animate-bounce"
               >
                 ✅ Approve for Production
-              </button>
-            )}
-
-            {/* Reopen to Draft if needed */}
-            {handover.status !== "Draft" && (
-              <button
-                onClick={async () => {
-                  if (window.confirm("Reopen handover for modifications?")) {
-                    await updateDoc(doc(db, "handovers", handoverId), { status: "Draft" });
-                    setHandover((prev: any) => ({ ...prev, status: "Draft" }));
-                    await logModification("Handover Reopened", "Reopened for scope modifications.");
-                  }
-                }}
-                className="text-[11px] font-bold text-gray-500 hover:underline"
-              >
-                Reopen Draft
               </button>
             )}
           </div>
@@ -568,12 +554,7 @@ export default function HandoverWorkspace() {
                       <option value="Day Three">Day Three</option>
                       <option value="Day Four">Day Four</option>
                     </select>
-                    <button
-                      onClick={handleAddDay}
-                      className="bg-black text-white px-2.5 py-1 rounded text-xs font-black"
-                    >
-                      + Add
-                    </button>
+                    <button onClick={handleAddDay} className="bg-black text-white px-2.5 py-1 rounded text-xs font-black">+ Add</button>
                   </div>
                 </div>
 
@@ -660,7 +641,7 @@ export default function HandoverWorkspace() {
                         className="border p-1.5 rounded font-medium bg-white"
                       />
                       <input
-                        placeholder="Setup ready by (e.g. 3 PM)"
+                        placeholder="Setup ready by"
                         value={newEventReadyTime}
                         onChange={(e) => setNewEventReadyTime(e.target.value)}
                         className="border p-1.5 rounded font-medium bg-white"
@@ -715,9 +696,7 @@ export default function HandoverWorkspace() {
                       <span className="text-xs font-black uppercase text-purple-700 tracking-wider">
                         {currentDay.dayName} &gt; {currentEvent.eventName}
                       </span>
-                      <h2 className="text-2xl font-black text-gray-900">
-                        {currentEvent.eventName} Scope
-                      </h2>
+                      <h2 className="text-2xl font-black text-gray-900">{currentEvent.eventName} Scope</h2>
                     </div>
 
                     <div className="flex bg-gray-100 p-1 rounded-lg border">
@@ -759,68 +738,131 @@ export default function HandoverWorkspace() {
                     </div>
                   </div>
 
-                  {/* TAB 1: DECOR */}
+                  {/* TAB 1: DECOR (WITH VISUAL COMPONENT PICKER) */}
                   {eventScopeTab === "decor" && (
                     <div className="space-y-6">
-                      {/* Add Form */}
+                      {/* Form to Attach Component */}
                       <div className="bg-slate-50 p-4 rounded-xl border-2 border-slate-300 space-y-3">
-                        <h4 className="font-black text-xs uppercase text-slate-800">+ Attach Decor Component:</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <select
-                            value={selectedCompId}
-                            onChange={(e) => setSelectedCompId(e.target.value)}
-                            className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
+                        <div className="flex justify-between items-center">
+                          <h4 className="font-black text-xs uppercase text-slate-800">
+                            + Add Decor Component to {currentEvent.eventName}:
+                          </h4>
+
+                          {/* BUTTON TO OPEN FULL SCREEN COMPONENT PICKER */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setComponentPickerCategory("All");
+                              setComponentPickerSearch("");
+                              setShowComponentPickerModal(true);
+                            }}
+                            className="bg-blue-700 hover:bg-blue-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow flex items-center gap-1.5"
                           >
-                            <option value="">-- Choose Stage, Gate, Canopy, Lounge --</option>
-                            {componentsLibrary.map((c) => (
-                              <option key={c.id} value={c.id}>[{c.category}] {c.name} ({c.code})</option>
-                            ))}
-                          </select>
-                          <input
-                            placeholder="Placement in venue (e.g. Center Stage Lawn)"
-                            value={compPlacement}
-                            onChange={(e) => setCompPlacement(e.target.value)}
-                            className="border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                          />
+                            🖼️ Browse & Pick Component
+                          </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <input
-                            placeholder="Size changes (e.g. 28x16 ft)"
-                            value={compCustomSize}
-                            onChange={(e) => setCompCustomSize(e.target.value)}
-                            className="border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                          />
-                          <input
-                            placeholder="Color variation (e.g. White & Gold)"
-                            value={compColorVariation}
-                            onChange={(e) => setCompColorVariation(e.target.value)}
-                            className="border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                          />
-                        </div>
+                        {/* Selected Component Preview Banner */}
+                        {currentSelectedComponent ? (
+                          <div className="bg-white border-2 border-blue-400 p-3 rounded-xl flex items-center gap-4 shadow-sm">
+                            <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden border flex-shrink-0">
+                              {currentSelectedComponent.images?.[0] ? (
+                                <img
+                                  src={currentSelectedComponent.images[0]}
+                                  alt={currentSelectedComponent.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="text-[10px] text-gray-400 text-center pt-5">No Pic</div>
+                              )}
+                            </div>
 
-                        <textarea
-                          rows={2}
-                          placeholder="Client changes / specific requests..."
-                          value={compClientChanges}
-                          onChange={(e) => setCompClientChanges(e.target.value)}
-                          className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
-                        />
+                            <div className="flex-1">
+                              <span className="text-[10px] font-black uppercase bg-blue-100 text-blue-900 px-2 py-0.5 rounded">
+                                {currentSelectedComponent.category}
+                              </span>
+                              <h4 className="font-bold text-gray-900 text-sm">{currentSelectedComponent.name}</h4>
+                              <p className="text-xs text-gray-500 font-mono">Code: {currentSelectedComponent.code}</p>
+                            </div>
 
-                        {/* Audio Note */}
-                        <div className="flex items-center gap-3 bg-purple-50 p-2 rounded-lg border border-purple-200">
-                          <span className="text-xs font-black text-purple-900">🎙️ Voice Note:</span>
-                          {!isRecording ? (
-                            <button type="button" onClick={startRecording} className="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs">🔴 Record</button>
-                          ) : (
-                            <button type="button" onClick={stopRecording} className="bg-black text-white font-bold px-2.5 py-1 rounded text-xs animate-pulse">⏹️ Stop</button>
-                          )}
-                          {compAudioFile && <span className="text-xs text-green-700 font-bold">✅ Audio attached</span>}
-                        </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowComponentPickerModal(true)}
+                              className="text-blue-700 font-bold text-xs underline"
+                            >
+                              Change Component
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-center py-4 bg-white border border-dashed border-gray-300 rounded-lg">
+                            <p className="text-xs font-bold text-gray-500">
+                              Click "🖼️ Browse & Pick Component" above to visually choose a stage, gate, or canopy.
+                            </p>
+                          </div>
+                        )}
 
-                        <button onClick={handleAddDecorComponent} className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow">
-                          + Attach to Event Scope
-                        </button>
+                        {/* Customization Details */}
+                        {currentSelectedComponent && (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <label className="block text-xs font-black text-gray-700 mb-1">Placement in Venue *</label>
+                                <input
+                                  placeholder="e.g. Center Lawn Stage, Main Gate"
+                                  value={compPlacement}
+                                  onChange={(e) => setCompPlacement(e.target.value)}
+                                  className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-black text-gray-700 mb-1">Size Modification</label>
+                                <input
+                                  placeholder={`Default: ${currentSelectedComponent.dimensions?.length}x${currentSelectedComponent.dimensions?.width} ${currentSelectedComponent.dimensions?.unit}`}
+                                  value={compCustomSize}
+                                  onChange={(e) => setCompCustomSize(e.target.value)}
+                                  className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-black text-gray-700 mb-1">Color Variation</label>
+                                <input
+                                  placeholder="e.g. White & Gold theme"
+                                  value={compColorVariation}
+                                  onChange={(e) => setCompColorVariation(e.target.value)}
+                                  className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-black text-gray-700 mb-1">Client Requests & Changes</label>
+                              <textarea
+                                rows={2}
+                                placeholder="Specific instructions requested by bride/groom..."
+                                value={compClientChanges}
+                                onChange={(e) => setCompClientChanges(e.target.value)}
+                                className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
+                              />
+                            </div>
+
+                            {/* Voice Note */}
+                            <div className="flex items-center gap-3 bg-purple-50 p-2 rounded-lg border border-purple-200">
+                              <span className="text-xs font-black text-purple-900">🎙️ Voice Note:</span>
+                              {!isRecording ? (
+                                <button type="button" onClick={startRecording} className="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs shadow">🔴 Record</button>
+                              ) : (
+                                <button type="button" onClick={stopRecording} className="bg-black text-white font-bold px-2.5 py-1 rounded text-xs animate-pulse">⏹️ Stop</button>
+                              )}
+                              {compAudioFile && <span className="text-xs text-green-700 font-bold">✅ Audio recorded</span>}
+                            </div>
+
+                            <button onClick={handleAddDecorComponent} className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow">
+                              + Attach to Event Scope
+                            </button>
+                          </>
+                        )}
                       </div>
 
                       {/* Items Cards */}
@@ -828,10 +870,17 @@ export default function HandoverWorkspace() {
                         {currentEvent.decorComponents?.map((item: any, idx: number) => (
                           <div key={idx} className="bg-white border-2 border-gray-300 rounded-xl p-4 space-y-3 shadow-sm">
                             <div className="flex justify-between items-start">
-                              <div>
-                                <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">{item.category}</span>
-                                <h5 className="font-black text-lg text-gray-900 mt-1">{item.name}</h5>
-                                <p className="text-xs font-semibold text-purple-800">📍 Placement: {item.placement || "Venue Area"}</p>
+                              <div className="flex items-center gap-3">
+                                {item.imageUrl && (
+                                  <div className="w-14 h-14 bg-gray-100 rounded-lg overflow-hidden border flex-shrink-0">
+                                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                  </div>
+                                )}
+                                <div>
+                                  <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">{item.category}</span>
+                                  <h5 className="font-black text-lg text-gray-900 mt-0.5">{item.name}</h5>
+                                  <p className="text-xs font-semibold text-purple-800">📍 Placement: {item.placement || "Venue Area"}</p>
+                                </div>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">{item.code}</span>
@@ -841,11 +890,11 @@ export default function HandoverWorkspace() {
 
                             <div className="bg-gray-50 p-2.5 rounded-lg border text-xs font-medium space-y-1">
                               {item.customSize && <p>📐 <strong>Size:</strong> {item.customSize}</p>}
-                              {item.colorVariation && <p>🎨 <strong>Color:</strong> {item.colorVariation}</p>}
+                              {item.colorVariation && <p>🎨 <strong>Color Changes:</strong> {item.colorVariation}</p>}
                               {item.clientChanges && <p className="text-amber-900">✏️ <strong>Notes:</strong> {item.clientChanges}</p>}
                             </div>
 
-                            {/* Dedicated Production Remark Box */}
+                            {/* Production Remark Box */}
                             <div className="bg-blue-50/70 border border-blue-200 p-2.5 rounded-lg">
                               <div className="flex justify-between items-center mb-1">
                                 <span className="text-xs font-black text-blue-950">🛠️ Production Execution Remarks:</span>
@@ -860,7 +909,7 @@ export default function HandoverWorkspace() {
                                 </button>
                               </div>
                               <p className="text-xs font-semibold text-gray-800">
-                                {item.productionRemarks ? item.productionRemarks : <span className="text-gray-400 italic">No production remarks added yet.</span>}
+                                {item.productionRemarks || <span className="text-gray-400 italic">No production remarks added yet.</span>}
                               </p>
                             </div>
 
@@ -908,7 +957,7 @@ export default function HandoverWorkspace() {
                         </div>
 
                         <input
-                          placeholder="Execution instructions (e.g. 6 cold pyros during entry)"
+                          placeholder="Execution notes (e.g. 6 cold pyros during entry)"
                           value={entNotes}
                           onChange={(e) => setEntNotes(e.target.value)}
                           className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
@@ -933,7 +982,6 @@ export default function HandoverWorkspace() {
                               </div>
                             </div>
 
-                            {/* Dedicated Production Remark Box */}
                             <div className="bg-blue-50/70 border border-blue-200 p-2 rounded-lg">
                               <div className="flex justify-between items-center mb-0.5">
                                 <span className="text-[11px] font-black text-blue-950">🛠️ Production Execution Remarks:</span>
@@ -966,7 +1014,7 @@ export default function HandoverWorkspace() {
           </div>
         )}
 
-        {/* VIEW 2: DISCUSSION TRAIL WITH ITEM TAGGING */}
+        {/* VIEW 2: DISCUSSION TRAIL */}
         {activeTab === "discussion" && (
           <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-6">
             <div className="border-b pb-3">
@@ -976,7 +1024,6 @@ export default function HandoverWorkspace() {
               </p>
             </div>
 
-            {/* Comments List */}
             <div className="space-y-4 max-h-[500px] overflow-y-auto p-2">
               {comments.map((c) => (
                 <div key={c.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg text-xs space-y-1.5">
@@ -994,7 +1041,6 @@ export default function HandoverWorkspace() {
                     </span>
                   </div>
 
-                  {/* Tagged Item Badge */}
                   {c.taggedItem && (
                     <div className="inline-block bg-purple-100 border border-purple-300 text-purple-900 font-bold px-2 py-0.5 rounded text-[11px]">
                       📌 Referencing: {c.taggedItem}
@@ -1006,9 +1052,7 @@ export default function HandoverWorkspace() {
               ))}
             </div>
 
-            {/* Post Comment Form */}
             <form onSubmit={handleSendComment} className="space-y-3 border-t pt-4">
-              {/* Optional Item Tagging Dropdown */}
               <div>
                 <label className="block text-xs font-black text-gray-700 mb-1">
                   Tag a Component or SFX Item in this Question (Optional):
@@ -1044,11 +1088,11 @@ export default function HandoverWorkspace() {
           </div>
         )}
 
-        {/* VIEW 3: AUDIT & MODIFICATION LOG (WHO, WHEN, REMARKS) */}
+        {/* VIEW 3: SUPER ADMIN EXCLUSIVE AUDIT LOG */}
         {activeTab === "audit" && isSuperAdmin && (
           <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-4">
             <div className="border-b pb-3">
-              <h3 className="text-xl font-black text-gray-900">📜 Modification & Audit Trail</h3>
+              <h3 className="text-xl font-black text-gray-900">📜 Modification & Audit Trail (Admin Only)</h3>
               <p className="text-xs font-semibold text-gray-500">
                 Transparent record of who made changes to this wedding handover, the exact time, and their remark.
               </p>
@@ -1078,9 +1122,131 @@ export default function HandoverWorkspace() {
 
               {(!handover.auditLogs || handover.auditLogs.length === 0) && (
                 <p className="text-center text-gray-400 py-12 text-xs italic">
-                  No modifications logged yet. Changes made after initial draft submission will appear here.
+                  No modifications logged yet.
                 </p>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* FULL SCREEN COMPONENT PICKER POPUP */}
+        {showComponentPickerModal && (
+          <div className="fixed inset-0 z-50 bg-black/85 flex flex-col p-4 md:p-6 backdrop-blur-sm">
+            <div className="w-full h-full max-w-7xl mx-auto bg-white rounded-2xl flex flex-col overflow-hidden shadow-2xl border-2 border-gray-400">
+              {/* Top Bar */}
+              <div className="p-4 md:p-6 border-b-2 border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2">
+                    🏛️ Select Decor Component
+                  </h2>
+                  <p className="text-xs font-bold text-gray-600">
+                    Click any stage, gate, canopy, or lounge setup to attach it to this event.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Category Filter */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-black text-gray-700">Category:</label>
+                    <select
+                      value={componentPickerCategory}
+                      onChange={(e) => setComponentPickerCategory(e.target.value)}
+                      className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
+                    >
+                      {componentCategories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat === "All" ? "✨ All Categories" : cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Search Bar */}
+                  <input
+                    placeholder="Search name or code..."
+                    value={componentPickerSearch}
+                    onChange={(e) => setComponentPickerSearch(e.target.value)}
+                    className="border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white"
+                  />
+
+                  {/* Close Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowComponentPickerModal(false)}
+                    className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs shadow flex items-center gap-1"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+              </div>
+
+              {/* Components Visual Grid */}
+              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {filteredComponents.map((comp) => {
+                  const hasPic = comp.images && comp.images.length > 0;
+                  return (
+                    <div
+                      key={comp.id}
+                      onClick={() => {
+                        setCurrentSelectedComponent(comp);
+                        setShowComponentPickerModal(false);
+                      }}
+                      className="bg-white border-2 border-gray-300 hover:border-blue-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="h-44 bg-gray-100 relative overflow-hidden">
+                          {hasPic ? (
+                            <img
+                              src={comp.images[0]}
+                              alt={comp.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                            />
+                          ) : (
+                            <div className="h-full flex items-center justify-center text-xs font-bold text-gray-400">
+                              No Photos
+                            </div>
+                          )}
+                          <span className="absolute top-2 left-2 bg-gray-900/90 text-white text-xs font-mono font-bold px-2 py-0.5 rounded">
+                            {comp.code || "COMP"}
+                          </span>
+                          <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded">
+                            ₹{comp.baseCost?.toLocaleString() || "0"}
+                          </span>
+                        </div>
+
+                        <div className="p-3.5 space-y-1">
+                          <span className="text-[10px] font-black uppercase text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                            {comp.category}
+                          </span>
+                          <h4 className="font-black text-base text-gray-900 mt-1 leading-tight group-hover:text-blue-800">
+                            {comp.name}
+                          </h4>
+                          {comp.dimensions?.length > 0 && (
+                            <p className="text-xs text-gray-600 font-semibold">
+                              📐 {comp.dimensions.length}×{comp.dimensions.width}×{comp.dimensions.height} {comp.dimensions.unit}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 border-t bg-gray-50">
+                        <button
+                          type="button"
+                          className="w-full bg-blue-600 group-hover:bg-blue-700 text-white font-black py-2 rounded-lg text-xs transition shadow"
+                        >
+                          Select This Component ✓
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredComponents.length === 0 && (
+                  <div className="col-span-full py-16 text-center text-gray-500 font-bold">
+                    No components found matching this filter.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1105,16 +1271,10 @@ export default function HandoverWorkspace() {
               />
 
               <div className="flex justify-end gap-2 pt-2 border-t">
-                <button
-                  onClick={() => setEditingRemarkItem(null)}
-                  className="px-4 py-1.5 border font-bold rounded text-xs"
-                >
+                <button onClick={() => setEditingRemarkItem(null)} className="px-4 py-1.5 border font-bold rounded text-xs">
                   Cancel
                 </button>
-                <button
-                  onClick={handleSaveProductionRemark}
-                  className="px-4 py-1.5 bg-blue-700 text-white font-black rounded text-xs"
-                >
+                <button onClick={handleSaveProductionRemark} className="px-4 py-1.5 bg-blue-700 text-white font-black rounded text-xs">
                   Save Remark
                 </button>
               </div>
