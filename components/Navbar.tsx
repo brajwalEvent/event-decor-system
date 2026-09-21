@@ -25,7 +25,7 @@ export default function Navbar() {
           </span>
 
           <nav className="flex items-center gap-1 sm:gap-2">
-            {/* 1. SUPER ADMIN EXCLUSIVE TAB */}
+            {/* Super Admin Exclusive */}
             {isSuperAdmin && (
               <Link
                 href="/admin/team"
@@ -39,7 +39,7 @@ export default function Navbar() {
               </Link>
             )}
 
-            {/* 2. WEDDING HANDOVERS (Visible to Everyone) */}
+            {/* Wedding Handovers */}
             <Link
               href="/handovers"
               className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
@@ -49,7 +49,7 @@ export default function Navbar() {
               📋 Wedding Handovers
             </Link>
 
-            {/* 3. MASTER LIBRARIES (Visible to Production & Super Admin Only) */}
+            {/* Production Master Libraries */}
             {canAccessProduction && (
               <>
                 <Link
@@ -58,8 +58,28 @@ export default function Navbar() {
                     pathname === "/components" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
                   }`}
                 >
-                  🏛️ Decor Components
+                  🏛️ Components
                 </Link>
+
+                <Link
+                  href="/flowers"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname === "/flowers" ? "bg-pink-700 text-white shadow" : "text-pink-300 hover:bg-gray-800"
+                  }`}
+                >
+                  🌸 Natural Flowers
+                </Link>
+
+                {/* NEW: LABOR MASTER LIBRARY */}
+                <Link
+                  href="/labors"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname === "/labors" ? "bg-amber-600 text-white shadow" : "text-amber-300 hover:bg-gray-800"
+                  }`}
+                >
+                  👷 Labor Master
+                </Link>
+
                 <Link
                   href="/entertainment"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
@@ -68,6 +88,7 @@ export default function Navbar() {
                 >
                   🎤 Entertainment & SFX
                 </Link>
+
                 <Link
                   href="/elements"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${

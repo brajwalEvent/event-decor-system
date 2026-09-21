@@ -8,6 +8,8 @@ import {
   updateDoc, 
   collection, 
   addDoc, 
+  getDocs, 
+  deleteDoc,
   query, 
   orderBy, 
   onSnapshot 
@@ -22,7 +24,9 @@ export default function HandoverWorkspace() {
   const { user, role, isSuperAdmin, loading } = useAuth();
 
   const [handover, setHandover] = useState<any>(null);
+  const [allOtherHandovers, setAllOtherHandovers] = useState<any[]>([]);
   const [componentsLibrary, setComponentsLibrary] = useState<any[]>([]);
+  const [elementsLibrary, setElementsLibrary] = useState<any[]>([]);
   const [entertainmentLibrary, setEntertainmentLibrary] = useState<any[]>([]);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
@@ -36,11 +40,19 @@ export default function HandoverWorkspace() {
   const [selectedEventIndex, setSelectedEventIndex] = useState<number>(0);
   const [eventScopeTab, setEventScopeTab] = useState<"decor" | "entertainment">("decor");
 
-  // FULL SCREEN COMPONENT PICKER POPUP STATES
+  // FULL SCREEN COMPONENT PICKER POPUP (WITH 3-WAY FILTER)
   const [showComponentPickerModal, setShowComponentPickerModal] = useState(false);
   const [componentPickerCategory, setComponentPickerCategory] = useState("All");
+  const [componentPickerTheme, setComponentPickerTheme] = useState("All");
+  const [componentPickerEvent, setComponentPickerEvent] = useState("All");
   const [componentPickerSearch, setComponentPickerSearch] = useState("");
   const [currentSelectedComponent, setCurrentSelectedComponent] = useState<any | null>(null);
+
+  // IMPORT MODAL STATES (SINGLE EVENT & FULL WEDDING)
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importMode, setImportMode] = useState<"single-event" | "full-wedding">("single-event");
+  const [selectedSourceHandoverId, setSelectedSourceHandoverId] = useState("");
+  const [selectedSourceEventKey, setSelectedSourceEventKey] = useState("");
 
   // Day & Event Add States
   const [newDayName, setNewDayName] = useState("Day One");
@@ -54,7 +66,7 @@ export default function HandoverWorkspace() {
   const [colorHex, setColorHex] = useState("#FFD700");
   const [colorRole, setColorRole] = useState("Major Drapery");
 
-  // Decor Component Add State
+  // Decor Component Customization Add State
   const [compCustomSize, setCompCustomSize] = useState("");
   const [compColorVariation, setCompColorVariation] = useState("");
   const [compPlacement, setCompPlacement] = useState("");
@@ -87,17 +99,20 @@ export default function HandoverWorkspace() {
         setHandover(hSnap.data());
       }
 
-      const compsSnap = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
-        const snap = await getDocs(collection(db, "components"));
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      });
-      setComponentsLibrary(compsSnap);
+      const allHSnap = await getDocs(collection(db, "handovers"));
+      const otherWeddings = allHSnap.docs
+        .filter((d) => d.id !== handoverId)
+        .map((d) => ({ id: d.id, ...d.data() }));
+      setAllOtherHandovers(otherWeddings);
 
-      const entsSnap = await import("firebase/firestore").then(async ({ getDocs, collection }) => {
-        const snap = await getDocs(collection(db, "entertainment"));
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      });
-      setEntertainmentLibrary(entsSnap);
+      const compsSnap = await getDocs(collection(db, "components"));
+      setComponentsLibrary(compsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      const elemsSnap = await getDocs(collection(db, "elements"));
+      setElementsLibrary(elemsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      const entsSnap = await getDocs(collection(db, "entertainment"));
+      setEntertainmentLibrary(entsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error(err);
     }
@@ -116,6 +131,7 @@ export default function HandoverWorkspace() {
     return () => unsubscribe();
   }, [handoverId]);
 
+  // Audit Logger
   const logModification = async (action: string, remark: string) => {
     const logEntry = {
       author: user?.email || "User",
@@ -152,6 +168,65 @@ export default function HandoverWorkspace() {
     }
   };
 
+  const handleDeleteEntireWedding = async () => {
+    if (!window.confirm(`⚠️ DANGER: Are you sure you want to permanently delete the entire wedding "${handover.title}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, "handovers", handoverId));
+      alert("Wedding handover deleted successfully.");
+      router.push("/handovers");
+    } catch (err) {
+      alert("Failed to delete wedding handover.");
+    }
+  };
+
+  // =========================================================================
+  // SAME-EVENT STOCK CONFLICT ENGINE (CALCULATES COMBINED DEMAND IN SAME EVENT)
+  // =========================================================================
+  const calculateEventStockConflicts = (event: any) => {
+    if (!event || !event.decorComponents || event.decorComponents.length === 0) return [];
+
+    const usageMap: { [elemId: string]: { name: string; sku: string; totalNeeded: number; usedInComponents: string[] } } = {};
+
+    event.decorComponents.forEach((comp: any) => {
+      const master = componentsLibrary.find((c) => c.id === comp.componentId);
+      master?.warehouseElements?.forEach((we: any) => {
+        if (!usageMap[we.elementId]) {
+          usageMap[we.elementId] = {
+            name: we.elementName,
+            sku: "",
+            totalNeeded: 0,
+            usedInComponents: [],
+          };
+        }
+        usageMap[we.elementId].totalNeeded += Number(we.quantity) || 1;
+        usageMap[we.elementId].usedInComponents.push(comp.name);
+      });
+    });
+
+    const conflicts: any[] = [];
+    Object.keys(usageMap).forEach((elemId) => {
+      const prop = elementsLibrary.find((e) => e.id === elemId);
+      const liveStock = Number(prop?.stock?.total ?? prop?.stockQuantity ?? 0);
+      const usage = usageMap[elemId];
+
+      if (usage.totalNeeded > liveStock) {
+        conflicts.push({
+          elementId: elemId,
+          elementName: prop?.name || usage.name,
+          sku: prop?.sku || "PROP",
+          totalNeeded: usage.totalNeeded,
+          liveStock,
+          shortage: usage.totalNeeded - liveStock,
+          usedInComponents: Array.from(new Set(usage.usedInComponents)),
+        });
+      }
+    });
+
+    return conflicts;
+  };
+
   const getAllTaggableItems = () => {
     const list: string[] = [];
     handover?.days?.forEach((day: any) => {
@@ -167,7 +242,81 @@ export default function HandoverWorkspace() {
     return list;
   };
 
-  // Add Day
+  // Full Wedding Import
+  const handleExecuteFullWeddingImport = async () => {
+    const sourceWedding = allOtherHandovers.find((w) => w.id === selectedSourceHandoverId);
+    if (!sourceWedding || !sourceWedding.days || sourceWedding.days.length === 0) {
+      alert("Selected wedding does not have any event days to import.");
+      return;
+    }
+
+    if (!window.confirm(`Import all days & decor scopes from "${sourceWedding.title}"? (Entertainment & SFX will NOT be copied).`)) {
+      return;
+    }
+
+    const clonedDays = sourceWedding.days.map((d: any) => ({
+      dayName: d.dayName,
+      events: (d.events || []).map((ev: any) => ({
+        eventName: ev.eventName,
+        locationInResort: ev.locationInResort || "",
+        setupReadyTime: ev.setupReadyTime || "",
+        colorThemes: JSON.parse(JSON.stringify(ev.colorThemes || [])),
+        decorComponents: JSON.parse(JSON.stringify(ev.decorComponents || [])),
+        entertainmentElements: [],
+      })),
+    }));
+
+    await updateHandoverDaysInDb(clonedDays, `Imported Complete Wedding Decor from: ${sourceWedding.title}`);
+    setShowImportModal(false);
+    setSelectedDayIndex(0);
+    setSelectedEventIndex(0);
+    alert(`🎉 Successfully imported full decor scope!`);
+  };
+
+  // Single Event Import
+  const handleExecuteSingleEventImport = async () => {
+    if (!handover.days || handover.days.length === 0) {
+      alert("Please create at least one Day first.");
+      return;
+    }
+
+    const sourceWedding = allOtherHandovers.find((w) => w.id === selectedSourceHandoverId);
+    if (!sourceWedding || !selectedSourceEventKey) {
+      alert("Please select both a source wedding and an event to import.");
+      return;
+    }
+
+    const [srcDayIdx, srcEvIdx] = selectedSourceEventKey.split("_").map(Number);
+    const sourceEvent = sourceWedding.days?.[srcDayIdx]?.events?.[srcEvIdx];
+
+    if (!sourceEvent) {
+      alert("Source event not found.");
+      return;
+    }
+
+    const clonedEvent = {
+      eventName: sourceEvent.eventName,
+      locationInResort: sourceEvent.locationInResort || "",
+      setupReadyTime: sourceEvent.setupReadyTime || "",
+      colorThemes: JSON.parse(JSON.stringify(sourceEvent.colorThemes || [])),
+      decorComponents: JSON.parse(JSON.stringify(sourceEvent.decorComponents || [])),
+      entertainmentElements: [],
+    };
+
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events.push(clonedEvent);
+
+    await updateHandoverDaysInDb(
+      updatedDays,
+      `Imported Event "${sourceEvent.eventName}" from ${sourceWedding.title} into ${currentDay.dayName}`
+    );
+
+    setShowImportModal(false);
+    setSelectedEventIndex(updatedDays[selectedDayIndex].events.length - 1);
+    alert(`🎉 Successfully imported "${sourceEvent.eventName}"!`);
+  };
+
+  // Days & Events CRUD
   const handleAddDay = async () => {
     const updatedDays = [...(handover.days || [])];
     updatedDays.push({ dayName: newDayName, events: [] });
@@ -184,7 +333,6 @@ export default function HandoverWorkspace() {
     setSelectedEventIndex(0);
   };
 
-  // Add Event
   const handleAddEvent = async () => {
     const finalEventName = isCustomEventName ? customEventInput.trim() : newEventName;
     if (!finalEventName) return;
@@ -218,7 +366,7 @@ export default function HandoverWorkspace() {
     setSelectedEventIndex(0);
   };
 
-  // Colors
+  // Color Themes
   const handleAddColorTheme = async () => {
     const updatedDays = [...handover.days];
     const currentEvent = updatedDays[selectedDayIndex]?.events[selectedEventIndex];
@@ -263,7 +411,7 @@ export default function HandoverWorkspace() {
     }
   };
 
-  // Attach Chosen Decor Component to Event Scope
+  // Attach Decor Component
   const handleAddDecorComponent = async () => {
     if (!currentSelectedComponent) {
       alert("Please choose a component first using the visual picker.");
@@ -286,6 +434,7 @@ export default function HandoverWorkspace() {
       name: currentSelectedComponent.name,
       category: currentSelectedComponent.category,
       code: currentSelectedComponent.code || "COMP",
+      theme: currentSelectedComponent.theme || "",
       imageUrl: currentSelectedComponent.images?.[0] || "",
       customSize: compCustomSize || `${currentSelectedComponent.dimensions?.length}x${currentSelectedComponent.dimensions?.width} ${currentSelectedComponent.dimensions?.unit}`,
       colorVariation: compColorVariation,
@@ -312,7 +461,7 @@ export default function HandoverWorkspace() {
     await updateHandoverDaysInDb(updatedDays, `Removed Component: ${compName}`);
   };
 
-  // Attach Entertainment
+  // Entertainment
   const handleAddEntertainment = async () => {
     if (!selectedEntId) return;
     const master = entertainmentLibrary.find((e) => e.id === selectedEntId);
@@ -381,7 +530,7 @@ export default function HandoverWorkspace() {
     setRemarkText("");
   };
 
-  // Submit Handover (Sales)
+  // Submit (Sales)
   const handleSubmitToBackend = async () => {
     if (!window.confirm("Submit this wedding handover to the Backend Production team?")) return;
     await updateDoc(doc(db, "handovers", handoverId), {
@@ -394,12 +543,12 @@ export default function HandoverWorkspace() {
     await addDoc(collection(db, "handovers", handoverId, "comments"), {
       author: user?.email || "Sales",
       role: role || "sales",
-      message: "🚨 Handover submitted for production review. Please verify specs and raise queries if any.",
+      message: "🚨 Handover submitted for production review.",
       createdAt: new Date().toISOString(),
     });
   };
 
-  // Approve Handover (Production)
+  // Approve (Production)
   const handleApproveHandover = async () => {
     const remark = prompt("Production Approval: Enter any final execution remarks before approving:", "All dimensions and sound specs verified. Approved for setup.") || "Approved for setup";
     await updateDoc(doc(db, "handovers", handoverId), {
@@ -434,14 +583,17 @@ export default function HandoverWorkspace() {
     setCommentTaggedItem("");
   };
 
-  // Distinct Component Categories for the Popup Filter
+  // 3-WAY FILTER LISTS
   const componentCategories = ["All", ...Array.from(new Set(componentsLibrary.map((c) => c.category).filter(Boolean)))];
+  const componentThemes = ["All", ...Array.from(new Set(componentsLibrary.map((c) => c.theme).filter(Boolean)))];
+  const componentEvents = ["All", "Haldi", "Mehendi", "Sangeet", "Wedding", "Reception", "Cocktail", "Pool Party", "After Party"];
 
-  // Filtered Components for Popup Grid
   const filteredComponents = componentsLibrary.filter((c) => {
     const matchesCat = componentPickerCategory === "All" || c.category === componentPickerCategory;
+    const matchesTheme = componentPickerTheme === "All" || c.theme?.toLowerCase() === componentPickerTheme.toLowerCase();
+    const matchesEvent = componentPickerEvent === "All" || (c.events && c.events.includes(componentPickerEvent));
     const matchesSearch = !componentPickerSearch || c.name.toLowerCase().includes(componentPickerSearch.toLowerCase()) || c.code?.toLowerCase().includes(componentPickerSearch.toLowerCase());
-    return matchesCat && matchesSearch;
+    return matchesCat && matchesTheme && matchesEvent && matchesSearch;
   });
 
   if (!handover) return <div className="p-8 text-center text-xl font-bold">Loading Handover Workspace...</div>;
@@ -449,6 +601,12 @@ export default function HandoverWorkspace() {
   const currentDay = handover.days?.[selectedDayIndex];
   const currentEvent = currentDay?.events?.[selectedEventIndex];
   const taggableItems = getAllTaggableItems();
+  const selectedSourceWeddingObj = allOtherHandovers.find((w) => w.id === selectedSourceHandoverId);
+
+  // RUN REAL-TIME SAME-EVENT STOCK CONFLICT CHECK FOR CURRENT EVENT
+  const currentEventStockConflicts = calculateEventStockConflicts(currentEvent);
+
+  const canDeleteWedding = isSuperAdmin || role === "admin" || (role === "sales" && handover.status === "Draft");
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 pb-16">
@@ -456,6 +614,16 @@ export default function HandoverWorkspace() {
       <div className="bg-white border-b-2 border-gray-300 shadow-sm sticky top-16 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
+            {/* Back Button */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <button
+                onClick={() => router.push("/handovers")}
+                className="text-xs font-bold text-gray-600 hover:text-black flex items-center gap-1 bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-md border transition"
+              >
+                ← Back to Weddings Dashboard
+              </button>
+            </div>
+
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-black text-gray-900">{handover.title}</h1>
               <span className={`text-xs uppercase font-black px-2.5 py-1 rounded border ${
@@ -473,7 +641,7 @@ export default function HandoverWorkspace() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Main Tabs */}
             <div className="bg-gray-100 p-1 rounded-lg border border-gray-300 flex">
               <button
@@ -484,15 +652,6 @@ export default function HandoverWorkspace() {
               >
                 📋 Scope & Setup
               </button>
-
-{/* PRESENTATION DECK & PDF EXPORT BUTTON */}
-<button
-  onClick={() => router.push(`/handovers/${handoverId}/presentation`)}
-  className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5"
->
-  📑 Presentation Deck & PDF
-</button>
-
               <button
                 onClick={() => setActiveTab("discussion")}
                 className={`px-3 py-1.5 rounded-md text-xs font-black transition flex items-center gap-1.5 ${
@@ -507,7 +666,6 @@ export default function HandoverWorkspace() {
                 )}
               </button>
 
-              {/* STRICTLY SUPER ADMIN EXCLUSIVE */}
               {isSuperAdmin && (
                 <button
                   onClick={() => setActiveTab("audit")}
@@ -519,6 +677,50 @@ export default function HandoverWorkspace() {
                 </button>
               )}
             </div>
+
+            {/* Clone Full Wedding Decor */}
+            <button
+              onClick={() => {
+                setImportMode("full-wedding");
+                setSelectedSourceHandoverId("");
+                setShowImportModal(true);
+              }}
+              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-3 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+            >
+              📥 Clone Full Wedding Decor
+            </button>
+
+            {/* Presentation Deck & PDF */}
+            <button
+              onClick={() => router.push(`/handovers/${handoverId}/presentation`)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+            >
+              📑 PDF & Deck
+            </button>
+
+{/* 🌸 FLOWER PROCUREMENT SHEET BUTTON */}
+            <button
+              onClick={() => router.push(`/handovers/${handoverId}/flowers-sheet`)}
+              className="bg-pink-700 hover:bg-pink-800 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+            >
+              🌸 Flower Sheet & PDF
+            </button>
+
+            {/* 👷 LABOR & OPERATIONS PLANNER BUTTON */}
+            <button
+              onClick={() => router.push(`/handovers/${handoverId}/labor-planner`)}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+            >
+              👷 Labor Planner & PDF
+            </button>
+
+            {/* 🎤 ENTERTAINMENT & SFX SHEET BUTTON */}
+            <button
+              onClick={() => router.push(`/handovers/${handoverId}/entertainment-sheet`)}
+              className="bg-purple-800 hover:bg-purple-900 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+            >
+              🎤 Entertainment & SFX Sheet
+            </button>
 
             {/* Workflow Buttons */}
             {isSales && handover.status === "Draft" && (
@@ -536,6 +738,17 @@ export default function HandoverWorkspace() {
                 className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow transition flex items-center gap-1.5 animate-bounce"
               >
                 ✅ Approve for Production
+              </button>
+            )}
+
+            {/* Delete Entire Wedding */}
+            {canDeleteWedding && (
+              <button
+                onClick={handleDeleteEntireWedding}
+                className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 font-black px-3 py-2 rounded-lg text-xs shadow-sm transition flex items-center gap-1"
+                title="Delete this entire wedding"
+              >
+                🗑️ Delete Wedding
               </button>
             )}
           </div>
@@ -600,13 +813,26 @@ export default function HandoverWorkspace() {
                 </div>
               </div>
 
-              {/* Sub-Events */}
+              {/* Sub-Events on Current Day */}
               {currentDay && (
                 <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3">
-                  <div className="border-b pb-2">
+                  <div className="flex justify-between items-center border-b pb-2">
                     <h3 className="font-black text-sm uppercase text-gray-900">
                       2. Events on {currentDay.dayName}
                     </h3>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportMode("single-event");
+                        setSelectedSourceHandoverId("");
+                        setSelectedSourceEventKey("");
+                        setShowImportModal(true);
+                      }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-2.5 py-1 rounded text-[11px] shadow flex items-center gap-1"
+                    >
+                      📥 Import Event
+                    </button>
                   </div>
 
                   <div className="bg-gray-50 p-3 rounded-lg border space-y-2 text-xs">
@@ -666,30 +892,42 @@ export default function HandoverWorkspace() {
                   </div>
 
                   <div className="space-y-1.5">
-                    {currentDay.events?.map((ev: any, idx: number) => (
-                      <div
-                        key={idx}
-                        className={`p-2.5 rounded-lg border-2 transition flex justify-between items-center ${
-                          selectedEventIndex === idx
-                            ? "bg-purple-50 border-purple-600"
-                            : "bg-white border-gray-200 hover:bg-gray-50"
-                        }`}
-                      >
-                        <div onClick={() => setSelectedEventIndex(idx)} className="cursor-pointer flex-1">
-                          <p className="font-black text-sm text-gray-900">{ev.eventName}</p>
-                          <p className="text-[11px] text-gray-500 font-semibold">
-                            📍 {ev.locationInResort || "TBD"} | ⏰ {ev.setupReadyTime || "TBD"}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEvent(idx)}
-                          className="text-red-600 hover:bg-red-50 p-1 rounded font-bold text-xs"
+                    {currentDay.events?.map((ev: any, idx: number) => {
+                      // Check if this sub-event has stock conflict
+                      const conflictsInEv = calculateEventStockConflicts(ev);
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-2.5 rounded-lg border-2 transition flex justify-between items-center ${
+                            selectedEventIndex === idx
+                              ? "bg-purple-50 border-purple-600"
+                              : "bg-white border-gray-200 hover:bg-gray-50"
+                          }`}
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                          <div onClick={() => setSelectedEventIndex(idx)} className="cursor-pointer flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-black text-sm text-gray-900">{ev.eventName}</p>
+                              {conflictsInEv.length > 0 && (
+                                <span className="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded animate-pulse">
+                                  ⚠️ Stock Conflict
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-gray-500 font-semibold">
+                              📍 {ev.locationInResort || "TBD"} | ⏰ {ev.setupReadyTime || "TBD"}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEvent(idx)}
+                            className="text-red-600 hover:bg-red-50 p-1 rounded font-bold text-xs"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -728,6 +966,33 @@ export default function HandoverWorkspace() {
                     </div>
                   </div>
 
+                  {/* REAL-TIME SAME-EVENT STOCK CONFLICT ALERT BANNER */}
+                  {currentEventStockConflicts.length > 0 && (
+                    <div className="bg-red-50 border-2 border-red-500 p-4 rounded-xl space-y-2 animate-pulse shadow-md">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🚨</span>
+                        <h4 className="font-black text-red-700 text-sm uppercase tracking-wide">
+                          SAME-EVENT PROP STOCK SHORTAGE DETECTED ({currentEventStockConflicts.length} Conflicts)
+                        </h4>
+                      </div>
+                      <p className="text-xs text-red-950 font-medium">
+                        Components in this event <strong>({currentEvent.eventName})</strong> are simultaneously competing for warehouse props that exceed available stock! (Props can be reused across different events, but cannot be shared in the same event at the same time).
+                      </p>
+                      <div className="space-y-1.5 pt-1">
+                        {currentEventStockConflicts.map((conf: any, cIdx: number) => (
+                          <div key={cIdx} className="bg-white border border-red-300 p-2.5 rounded-lg text-xs font-bold text-red-900 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 shadow-sm">
+                            <span>
+                              • <strong>{conf.elementName}</strong> (SKU: {conf.sku}): Combined Demand = <span className="text-red-700 font-black">{conf.totalNeeded} units</span>, Warehouse Stock = <span className="text-gray-900">{conf.liveStock} units</span> (Short by {conf.shortage})
+                            </span>
+                            <span className="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded font-mono font-semibold">
+                              Used in: {conf.usedInComponents.join(", ")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Color Palette */}
                   <div className="bg-amber-50/60 p-3.5 rounded-xl border-2 border-amber-200 space-y-2">
                     <p className="text-xs font-black text-amber-950 uppercase">🎨 Event Color Palette:</p>
@@ -747,21 +1012,22 @@ export default function HandoverWorkspace() {
                     </div>
                   </div>
 
-                  {/* TAB 1: DECOR (WITH VISUAL COMPONENT PICKER) */}
+                  {/* TAB 1: DECOR */}
                   {eventScopeTab === "decor" && (
                     <div className="space-y-6">
-                      {/* Form to Attach Component */}
+                      {/* Attach Component Form */}
                       <div className="bg-slate-50 p-4 rounded-xl border-2 border-slate-300 space-y-3">
                         <div className="flex justify-between items-center">
                           <h4 className="font-black text-xs uppercase text-slate-800">
                             + Add Decor Component to {currentEvent.eventName}:
                           </h4>
 
-                          {/* BUTTON TO OPEN FULL SCREEN COMPONENT PICKER */}
                           <button
                             type="button"
                             onClick={() => {
                               setComponentPickerCategory("All");
+                              setComponentPickerTheme("All");
+                              setComponentPickerEvent("All");
                               setComponentPickerSearch("");
                               setShowComponentPickerModal(true);
                             }}
@@ -771,7 +1037,6 @@ export default function HandoverWorkspace() {
                           </button>
                         </div>
 
-                        {/* Selected Component Preview Banner */}
                         {currentSelectedComponent ? (
                           <div className="bg-white border-2 border-blue-400 p-3 rounded-xl flex items-center gap-4 shadow-sm">
                             <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden border flex-shrink-0">
@@ -790,6 +1055,11 @@ export default function HandoverWorkspace() {
                               <span className="text-[10px] font-black uppercase bg-blue-100 text-blue-900 px-2 py-0.5 rounded">
                                 {currentSelectedComponent.category}
                               </span>
+                              {currentSelectedComponent.theme && (
+                                <span className="ml-2 text-[10px] font-black bg-purple-100 text-purple-900 px-2 py-0.5 rounded">
+                                  🎨 {currentSelectedComponent.theme}
+                                </span>
+                              )}
                               <h4 className="font-bold text-gray-900 text-sm">{currentSelectedComponent.name}</h4>
                               <p className="text-xs text-gray-500 font-mono">Code: {currentSelectedComponent.code}</p>
                             </div>
@@ -810,7 +1080,6 @@ export default function HandoverWorkspace() {
                           </div>
                         )}
 
-                        {/* Customization Details */}
                         {currentSelectedComponent && (
                           <>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -856,7 +1125,6 @@ export default function HandoverWorkspace() {
                               />
                             </div>
 
-                            {/* Voice Note */}
                             <div className="flex items-center gap-3 bg-purple-50 p-2 rounded-lg border border-purple-200">
                               <span className="text-xs font-black text-purple-900">🎙️ Voice Note:</span>
                               {!isRecording ? (
@@ -876,57 +1144,83 @@ export default function HandoverWorkspace() {
 
                       {/* Items Cards */}
                       <div className="space-y-4">
-                        {currentEvent.decorComponents?.map((item: any, idx: number) => (
-                          <div key={idx} className="bg-white border-2 border-gray-300 rounded-xl p-4 space-y-3 shadow-sm">
-                            <div className="flex justify-between items-start">
-                              <div className="flex items-center gap-3">
-                                {item.imageUrl && (
-                                  <div className="w-14 h-14 bg-gray-100 rounded-lg overflow-hidden border flex-shrink-0">
-                                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                        {currentEvent.decorComponents?.map((item: any, idx: number) => {
+                          // Check if this component has items involved in the same-event conflict
+                          const master = componentsLibrary.find((c) => c.id === item.componentId);
+                          const hasConflictingProps = master?.warehouseElements?.some((we: any) =>
+                            currentEventStockConflicts.some((conf: any) => conf.elementId === we.elementId)
+                          );
+
+                          return (
+                            <div
+                              key={idx}
+                              className={`bg-white border-2 rounded-xl p-4 space-y-3 shadow-sm transition ${
+                                hasConflictingProps ? "border-red-400 bg-red-50/20" : "border-gray-300"
+                              }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-3">
+                                  {item.imageUrl && (
+                                    <div className="w-14 h-14 bg-gray-100 rounded-lg overflow-hidden border flex-shrink-0">
+                                      <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">{item.category}</span>
+                                      {item.theme && (
+                                        <span className="text-xs font-black bg-purple-100 text-purple-900 px-2 py-0.5 rounded">
+                                          🎨 {item.theme}
+                                        </span>
+                                      )}
+                                      {/* COMPONENT SHORTAGE WARNING BADGE */}
+                                      {hasConflictingProps && (
+                                        <span className="bg-red-600 text-white font-black text-[10px] px-2 py-0.5 rounded animate-pulse shadow">
+                                          🚨 Shared Prop Shortage in this Event!
+                                        </span>
+                                      )}
+                                    </div>
+                                    <h5 className="font-black text-lg text-gray-900 mt-0.5">{item.name}</h5>
+                                    <p className="text-xs font-semibold text-purple-800">📍 Placement: {item.placement || "Venue Area"}</p>
                                   </div>
-                                )}
-                                <div>
-                                  <span className="text-xs font-black uppercase bg-slate-100 px-2 py-0.5 rounded border">{item.category}</span>
-                                  <h5 className="font-black text-lg text-gray-900 mt-0.5">{item.name}</h5>
-                                  <p className="text-xs font-semibold text-purple-800">📍 Placement: {item.placement || "Venue Area"}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">{item.code}</span>
+                                  <button onClick={() => handleDeleteDecorComponent(idx)} className="text-red-600 font-bold text-xs bg-red-50 p-1.5 rounded border border-red-200">Remove</button>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">{item.code}</span>
-                                <button onClick={() => handleDeleteDecorComponent(idx)} className="text-red-600 font-bold text-xs bg-red-50 p-1.5 rounded border border-red-200">Remove</button>
+
+                              <div className="bg-gray-50 p-2.5 rounded-lg border text-xs font-medium space-y-1">
+                                {item.customSize && <p>📐 <strong>Size:</strong> {item.customSize}</p>}
+                                {item.colorVariation && <p>🎨 <strong>Color Changes:</strong> {item.colorVariation}</p>}
+                                {item.clientChanges && <p className="text-amber-900">✏️ <strong>Notes:</strong> {item.clientChanges}</p>}
                               </div>
-                            </div>
 
-                            <div className="bg-gray-50 p-2.5 rounded-lg border text-xs font-medium space-y-1">
-                              {item.customSize && <p>📐 <strong>Size:</strong> {item.customSize}</p>}
-                              {item.colorVariation && <p>🎨 <strong>Color Changes:</strong> {item.colorVariation}</p>}
-                              {item.clientChanges && <p className="text-amber-900">✏️ <strong>Notes:</strong> {item.clientChanges}</p>}
-                            </div>
-
-                            {/* Production Remark Box */}
-                            <div className="bg-blue-50/70 border border-blue-200 p-2.5 rounded-lg">
-                              <div className="flex justify-between items-center mb-1">
-                                <span className="text-xs font-black text-blue-950">🛠️ Production Execution Remarks:</span>
-                                <button
-                                  onClick={() => {
-                                    setEditingRemarkItem({ type: 'decor', index: idx, currentRemark: item.productionRemarks || "" });
-                                    setRemarkText(item.productionRemarks || "");
-                                  }}
-                                  className="text-[11px] text-blue-700 font-bold hover:underline"
-                                >
-                                  {item.productionRemarks ? "Edit Remark" : "+ Add Production Remark"}
-                                </button>
+                              {/* Production Remark Box */}
+                              <div className="bg-blue-50/70 border border-blue-200 p-2.5 rounded-lg">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-xs font-black text-blue-950">🛠️ Production Execution Remarks:</span>
+                                  <button
+                                    onClick={() => {
+                                      setEditingRemarkItem({ type: 'decor', index: idx, currentRemark: item.productionRemarks || "" });
+                                      setRemarkText(item.productionRemarks || "");
+                                    }}
+                                    className="text-[11px] text-blue-700 font-bold hover:underline"
+                                  >
+                                    {item.productionRemarks ? "Edit Remark" : "+ Add Production Remark"}
+                                  </button>
+                                </div>
+                                <p className="text-xs font-semibold text-gray-800">
+                                  {item.productionRemarks || <span className="text-gray-400 italic">No production remarks added yet.</span>}
+                                </p>
                               </div>
-                              <p className="text-xs font-semibold text-gray-800">
-                                {item.productionRemarks || <span className="text-gray-400 italic">No production remarks added yet.</span>}
-                              </p>
-                            </div>
 
-                            {item.audioUrl && (
-                              <audio controls src={item.audioUrl} className="w-full h-8" />
-                            )}
-                          </div>
-                        ))}
+                              {item.audioUrl && (
+                                <audio controls src={item.audioUrl} className="w-full h-8" />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1097,11 +1391,11 @@ export default function HandoverWorkspace() {
           </div>
         )}
 
-        {/* VIEW 3: SUPER ADMIN EXCLUSIVE AUDIT LOG */}
+        {/* VIEW 3: AUDIT LOG */}
         {activeTab === "audit" && isSuperAdmin && (
           <div className="bg-white rounded-xl border-2 border-gray-300 p-6 shadow-sm max-w-4xl mx-auto space-y-4">
             <div className="border-b pb-3">
-              <h3 className="text-xl font-black text-gray-900">📜 Modification & Audit Trail (Admin Only)</h3>
+              <h3 className="text-xl font-black text-gray-900">📜 Modification & Audit Trail (Super Admin Only)</h3>
               <p className="text-xs font-semibold text-gray-500">
                 Transparent record of who made changes to this wedding handover, the exact time, and their remark.
               </p>
@@ -1138,58 +1432,174 @@ export default function HandoverWorkspace() {
           </div>
         )}
 
+        {/* MODAL: IMPORT EVENT OR FULL WEDDING */}
+        {showImportModal && (
+          <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-6 border-2 border-emerald-500 shadow-2xl space-y-5">
+              <div className="border-b pb-3 flex justify-between items-start">
+                <div>
+                  <span className="bg-emerald-100 text-emerald-900 text-[10px] uppercase font-black px-2 py-0.5 rounded">
+                    Decor Scope Replicator
+                  </span>
+                  <h3 className="text-xl font-black text-gray-900 mt-1">
+                    {importMode === "full-wedding" ? "Clone Full Wedding Decor Scope" : `Import Single Event into ${currentDay?.dayName}`}
+                  </h3>
+                  <p className="text-xs text-gray-600 font-medium mt-0.5">
+                    Note: Only Decor Components, Custom Sizes, Notes, and Color Themes are copied. Entertainment & SFX are kept empty.
+                  </p>
+                </div>
+                <button onClick={() => setShowImportModal(false)} className="text-gray-500 font-black text-xl hover:text-black">
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-black text-gray-800 mb-1">Select Source Wedding Handover *</label>
+                  <select
+                    value={selectedSourceHandoverId}
+                    onChange={(e) => {
+                      setSelectedSourceHandoverId(e.target.value);
+                      setSelectedSourceEventKey("");
+                    }}
+                    className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-sm bg-white text-gray-900"
+                  >
+                    <option value="">-- Choose Wedding Handover to Copy From --</option>
+                    {allOtherHandovers.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.title} ({w.resortName || "Venue"} - {w.days?.length || 0} days)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {importMode === "single-event" && selectedSourceWeddingObj && (
+                  <div>
+                    <label className="block font-black text-gray-800 mb-1">Select Specific Event to Import *</label>
+                    <select
+                      value={selectedSourceEventKey}
+                      onChange={(e) => setSelectedSourceEventKey(e.target.value)}
+                      className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-sm bg-white text-gray-900"
+                    >
+                      <option value="">-- Choose Sub-Event --</option>
+                      {selectedSourceWeddingObj.days?.map((d: any, dIdx: number) =>
+                        d.events?.map((ev: any, evIdx: number) => (
+                          <option key={`${dIdx}_${evIdx}`} value={`${dIdx}_${evIdx}`}>
+                            {d.dayName} &gt; {ev.eventName} ({ev.decorComponents?.length || 0} decor items)
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                )}
+
+                {selectedSourceWeddingObj && (
+                  <div className="bg-emerald-50 border border-emerald-300 p-3 rounded-xl space-y-1">
+                    <p className="font-bold text-emerald-950">
+                      Source: {selectedSourceWeddingObj.title}
+                    </p>
+                    <p className="text-gray-700">
+                      Location: {selectedSourceWeddingObj.resortName} | Guest Count: {selectedSourceWeddingObj.paxCount} Pax
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-3 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setShowImportModal(false)}
+                    className="px-4 py-2 border font-bold rounded-lg text-xs"
+                  >
+                    Cancel
+                  </button>
+
+                  {importMode === "full-wedding" ? (
+                    <button
+                      type="button"
+                      disabled={!selectedSourceHandoverId}
+                      onClick={handleExecuteFullWeddingImport}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-5 py-2 rounded-lg text-xs shadow disabled:opacity-50"
+                    >
+                      Clone All Days & Decor Scopes →
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!selectedSourceHandoverId || !selectedSourceEventKey}
+                      onClick={handleExecuteSingleEventImport}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-5 py-2 rounded-lg text-xs shadow disabled:opacity-50"
+                    >
+                      Import Event Decor →
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* FULL SCREEN COMPONENT PICKER POPUP */}
         {showComponentPickerModal && (
           <div className="fixed inset-0 z-50 bg-black/85 flex flex-col p-4 md:p-6 backdrop-blur-sm">
             <div className="w-full h-full max-w-7xl mx-auto bg-white rounded-2xl flex flex-col overflow-hidden shadow-2xl border-2 border-gray-400">
-              {/* Top Bar */}
               <div className="p-4 md:p-6 border-b-2 border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2">
                     🏛️ Select Decor Component
                   </h2>
                   <p className="text-xs font-bold text-gray-600">
-                    Click any stage, gate, canopy, or lounge setup to attach it to this event.
+                    Filter by Category, Theme, and Event to find the exact decor setup.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  {/* Category Filter */}
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-black text-gray-700">Category:</label>
-                    <select
-                      value={componentPickerCategory}
-                      onChange={(e) => setComponentPickerCategory(e.target.value)}
-                      className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white"
-                    >
-                      {componentCategories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat === "All" ? "✨ All Categories" : cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={componentPickerCategory}
+                    onChange={(e) => setComponentPickerCategory(e.target.value)}
+                    className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white text-gray-900"
+                  >
+                    {componentCategories.map((cat) => (
+                      <option key={cat} value={cat}>{cat === "All" ? "✨ All Categories" : cat}</option>
+                    ))}
+                  </select>
 
-                  {/* Search Bar */}
+                  <select
+                    value={componentPickerTheme}
+                    onChange={(e) => setComponentPickerTheme(e.target.value)}
+                    className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white text-purple-900"
+                  >
+                    {componentThemes.map((t) => (
+                      <option key={t} value={t}>{t === "All" ? "🎨 All Themes" : t}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={componentPickerEvent}
+                    onChange={(e) => setComponentPickerEvent(e.target.value)}
+                    className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white text-blue-900"
+                  >
+                    {componentEvents.map((ev) => (
+                      <option key={ev} value={ev}>{ev === "All" ? "🗓️ All Events" : ev}</option>
+                    ))}
+                  </select>
+
                   <input
-                    placeholder="Search name or code..."
+                    placeholder="Search name / code..."
                     value={componentPickerSearch}
                     onChange={(e) => setComponentPickerSearch(e.target.value)}
-                    className="border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white"
+                    className="border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white text-gray-900"
                   />
 
-                  {/* Close Button */}
                   <button
                     type="button"
                     onClick={() => setShowComponentPickerModal(false)}
-                    className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs shadow flex items-center gap-1"
+                    className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs shadow"
                   >
                     ✕ Close
                   </button>
                 </div>
               </div>
 
-              {/* Components Visual Grid */}
               <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {filteredComponents.map((comp) => {
                   const hasPic = comp.images && comp.images.length > 0;
@@ -1205,33 +1615,29 @@ export default function HandoverWorkspace() {
                       <div>
                         <div className="h-44 bg-gray-100 relative overflow-hidden">
                           {hasPic ? (
-                            <img
-                              src={comp.images[0]}
-                              alt={comp.name}
-                              className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                            />
+                            <img src={comp.images[0]} alt={comp.name} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
                           ) : (
-                            <div className="h-full flex items-center justify-center text-xs font-bold text-gray-400">
-                              No Photos
-                            </div>
+                            <div className="h-full flex items-center justify-center text-xs font-bold text-gray-400">No Photos</div>
                           )}
-                          <span className="absolute top-2 left-2 bg-gray-900/90 text-white text-xs font-mono font-bold px-2 py-0.5 rounded">
-                            {comp.code || "COMP"}
-                          </span>
-                          <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded">
-                            ₹{comp.baseCost?.toLocaleString() || "0"}
-                          </span>
+                          <span className="absolute top-2 left-2 bg-gray-900/90 text-white text-xs font-mono font-bold px-2 py-0.5 rounded">{comp.code || "COMP"}</span>
+                          <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded">₹{comp.baseCost?.toLocaleString() || "0"}</span>
+                          {comp.theme && (
+                            <span className="absolute bottom-2 left-2 bg-purple-900/90 text-white text-[10px] font-bold px-2 py-0.5 rounded">🎨 {comp.theme}</span>
+                          )}
                         </div>
 
-                        <div className="p-3.5 space-y-1">
-                          <span className="text-[10px] font-black uppercase text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                            {comp.category}
-                          </span>
-                          <h4 className="font-black text-base text-gray-900 mt-1 leading-tight group-hover:text-blue-800">
-                            {comp.name}
-                          </h4>
+                        <div className="p-3.5 space-y-1.5">
+                          <span className="text-[10px] font-black uppercase text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">{comp.category}</span>
+                          <h4 className="font-black text-base text-gray-900 leading-tight group-hover:text-blue-800">{comp.name}</h4>
+                          {comp.events && comp.events.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-0.5">
+                              {comp.events.map((evName: string, evIdx: number) => (
+                                <span key={evIdx} className="text-[10px] font-semibold bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">🗓️ {evName}</span>
+                              ))}
+                            </div>
+                          )}
                           {comp.dimensions?.length > 0 && (
-                            <p className="text-xs text-gray-600 font-semibold">
+                            <p className="text-xs text-gray-600 font-semibold pt-1">
                               📐 {comp.dimensions.length}×{comp.dimensions.width}×{comp.dimensions.height} {comp.dimensions.unit}
                             </p>
                           )}
@@ -1239,10 +1645,7 @@ export default function HandoverWorkspace() {
                       </div>
 
                       <div className="p-2.5 border-t bg-gray-50">
-                        <button
-                          type="button"
-                          className="w-full bg-blue-600 group-hover:bg-blue-700 text-white font-black py-2 rounded-lg text-xs transition shadow"
-                        >
+                        <button type="button" className="w-full bg-blue-600 group-hover:bg-blue-700 text-white font-black py-2 rounded-lg text-xs transition shadow">
                           Select This Component ✓
                         </button>
                       </div>
@@ -1252,7 +1655,7 @@ export default function HandoverWorkspace() {
 
                 {filteredComponents.length === 0 && (
                   <div className="col-span-full py-16 text-center text-gray-500 font-bold">
-                    No components found matching this filter.
+                    No components found matching this filter combination.
                   </div>
                 )}
               </div>
@@ -1264,28 +1667,18 @@ export default function HandoverWorkspace() {
         {editingRemarkItem && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-xl max-w-md w-full p-6 border-2 border-gray-400 shadow-2xl space-y-4">
-              <h3 className="text-lg font-black text-gray-900">
-                Add / Update Production Execution Remark
-              </h3>
-              <p className="text-xs text-gray-600 font-medium">
-                Add specific setup instructions or constraints for site engineers and supervisors.
-              </p>
-
+              <h3 className="text-lg font-black text-gray-900">Add / Update Production Execution Remark</h3>
+              <p className="text-xs text-gray-600 font-medium">Add setup instructions or constraints for site engineers and supervisors.</p>
               <textarea
                 rows={4}
-                placeholder="e.g. Truss setup requires 6 ballast weights. Must be assembled at 10 AM before floral team arrives."
+                placeholder="e.g. Truss setup requires 6 ballast weights. Must be assembled at 10 AM."
                 value={remarkText}
                 onChange={(e) => setRemarkText(e.target.value)}
-                className="w-full border-2 border-gray-400 p-2.5 rounded-lg text-xs font-semibold bg-white"
+                className="w-full border-2 border-gray-400 p-2.5 rounded-lg text-xs font-semibold bg-white text-gray-900"
               />
-
               <div className="flex justify-end gap-2 pt-2 border-t">
-                <button onClick={() => setEditingRemarkItem(null)} className="px-4 py-1.5 border font-bold rounded text-xs">
-                  Cancel
-                </button>
-                <button onClick={handleSaveProductionRemark} className="px-4 py-1.5 bg-blue-700 text-white font-black rounded text-xs">
-                  Save Remark
-                </button>
+                <button onClick={() => setEditingRemarkItem(null)} className="px-4 py-1.5 border font-bold rounded text-xs">Cancel</button>
+                <button onClick={handleSaveProductionRemark} className="px-4 py-1.5 bg-blue-700 text-white font-black rounded text-xs">Save Remark</button>
               </div>
             </div>
           </div>
