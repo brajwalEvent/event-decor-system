@@ -211,6 +211,42 @@ export default function HandoverPresentationPage() {
                   </div>
                 )}
 
+                {/* EVENT 2D FLOOR PLAN (PLANNER 5D) */}
+                {ev.floorPlans?.plan2dUrl && (
+                  <div className="bg-slate-50 border-2 border-emerald-300 rounded-2xl p-4 space-y-2 print-avoid-break">
+                    <div className="flex justify-between items-center border-b border-emerald-200 pb-1">
+                      <span className="text-xs font-black uppercase text-emerald-950 flex items-center gap-1.5">
+                        📐 Event 2D Spatial Floor Plan Layout
+                      </span>
+                      <span className="text-[10px] text-gray-500 font-bold print:hidden">
+                        (Click to view full-resolution blueprint)
+                      </span>
+                    </div>
+
+                    <div
+                      onClick={() =>
+                        setLightboxImage({
+                          url: ev.floorPlans.plan2dUrl,
+                          title: `2D Layout Blueprint - ${ev.eventName}`,
+                          subtitle: `Venue: ${ev.locationInResort || "Venue Area"}`,
+                        })
+                      }
+                      className="w-full h-80 sm:h-96 print:h-80 flex items-center justify-center cursor-zoom-in relative group bg-white rounded-xl border overflow-hidden p-2"
+                    >
+                      <img
+                        src={ev.floorPlans.plan2dUrl}
+                        alt="2D Floor Plan"
+                        className="max-h-full max-w-full object-contain mx-auto"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition flex items-center justify-center print:hidden">
+                        <span className="opacity-0 group-hover:opacity-100 bg-black/80 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow">
+                          🔍 Click to Expand Blueprint Fullscreen
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 {/* 2A. DECOR COMPONENTS (UNCROPPED TRUE-SHAPE IMAGES) */}
                 <div className="space-y-8">
                   <h4 className="text-xs font-black uppercase tracking-wider text-blue-900 border-b pb-1">

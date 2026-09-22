@@ -21,7 +21,7 @@ export default function ComponentsPage() {
 
   const [componentsList, setComponentsList] = useState<any[]>([]);
   const [warehouseElements, setWarehouseElements] = useState<any[]>([]);
-  const [naturalFlowersLibrary, setNaturalFlowersLibrary] = useState<any[]>([]); // Natural Flowers Master
+  const [naturalFlowersLibrary, setNaturalFlowersLibrary] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -65,7 +65,7 @@ export default function ComponentsPage() {
   const [height, setHeight] = useState("");
   const [unit, setUnit] = useState("ft");
 
-  // Multiple Events
+  // Events Selection
   const standardEventTypes = ["Haldi", "Mehendi", "Sangeet", "Wedding", "Reception", "Cocktail", "Pool Party", "After Party"];
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [customEventInput, setCustomEventInput] = useState("");
@@ -75,7 +75,7 @@ export default function ComponentsPage() {
     { elementId: string; elementName: string; elementCategory?: string; elementSku?: string; imageUrl?: string; quantity: number; notes: string }[]
   >([]);
 
-  // 2. STEP 2 FEATURE: Natural Flowers Assigned to this Component
+  // 2. Natural Flowers Assigned
   const [selectedFlowers, setSelectedFlowers] = useState<
     { flowerId: string; flowerName: string; unit: string; approxPrice: number; quantity: number; notes: string }[]
   >([]);
@@ -83,7 +83,7 @@ export default function ComponentsPage() {
   const [currentFlowerQty, setCurrentFlowerQty] = useState<number>(1);
   const [currentFlowerNotes, setCurrentFlowerNotes] = useState("");
 
-  // 3. General Fresh Consumables (Non-flower items: flex print, thermocol, candles)
+  // 3. General Fresh Consumables (Non-flower items)
   const [freshPurchases, setFreshPurchases] = useState<
     { item: string; qtyDescription: string; estimatedCost: number }[]
   >([]);
@@ -136,17 +136,14 @@ export default function ComponentsPage() {
 
   const fetchData = async () => {
     try {
-      // 1. Components
       const compQ = query(collection(db, "components"), orderBy("createdAt", "desc"));
       const compSnap = await getDocs(compQ);
       setComponentsList(compSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      // 2. Warehouse Elements
       const elemQ = query(collection(db, "elements"), orderBy("name", "asc"));
       const elemSnap = await getDocs(elemQ);
       setWarehouseElements(elemSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      // 3. Natural Flowers Master Library
       const flSnap = await getDocs(query(collection(db, "natural_flowers"), orderBy("name", "asc")));
       setNaturalFlowersLibrary(flSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
@@ -172,14 +169,14 @@ export default function ComponentsPage() {
   };
 
   const handleAddCustomEvent = () => {
-    if (!customEventInput.trim()) return;
-    if (!selectedEvents.includes(customEventInput.trim())) {
-      setSelectedEvents([...selectedEvents, customEventInput.trim()]);
+    const trimmed = customEventInput.trim();
+    if (!trimmed) return;
+    if (!selectedEvents.includes(trimmed)) {
+      setSelectedEvents([...selectedEvents, trimmed]);
     }
     setCustomEventInput("");
   };
 
-  // Add/Merge Warehouse Element
   const handleAddWarehouseElement = () => {
     if (!currentSelectedElement) {
       alert("Please select a prop first.");
@@ -220,7 +217,6 @@ export default function ComponentsPage() {
     setCurrentElemNotes("");
   };
 
-  // ADD / MERGE NATURAL FLOWER TO COMPONENT
   const handleAddNaturalFlower = () => {
     if (!currentFlowerId) {
       alert("Please select a natural flower from the list.");
@@ -234,7 +230,6 @@ export default function ComponentsPage() {
     const existingIdx = selectedFlowers.findIndex((f) => f.flowerId === currentFlowerId);
 
     if (existingIdx > -1) {
-      // Merge quantity if already selected
       const updated = [...selectedFlowers];
       updated[existingIdx].quantity = Number(updated[existingIdx].quantity) + qty;
       if (currentFlowerNotes.trim()) {
@@ -244,7 +239,6 @@ export default function ComponentsPage() {
       }
       setSelectedFlowers(updated);
     } else {
-      // Add new flower line
       setSelectedFlowers([
         ...selectedFlowers,
         {
@@ -263,7 +257,6 @@ export default function ComponentsPage() {
     setCurrentFlowerNotes("");
   };
 
-  // General Fresh Consumables
   const handleAddFreshItem = () => {
     if (!freshItemName.trim()) return;
     setFreshPurchases([
@@ -275,7 +268,6 @@ export default function ComponentsPage() {
     setFreshItemCost(0);
   };
 
-  // Vendor Rentals
   const handleAddRental = () => {
     if (!rentalItemName.trim()) return;
     setVendorRentals([
@@ -306,7 +298,6 @@ export default function ComponentsPage() {
     setVariationCost(0);
   };
 
-  // Audio Recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -358,7 +349,7 @@ export default function ComponentsPage() {
     setUnit("ft");
     setSelectedEvents([]);
     setSelectedWarehouseElements([]);
-    setSelectedFlowers([]); // Reset flowers
+    setSelectedFlowers([]);
     setCurrentFlowerId("");
     setCurrentFlowerQty(1);
     setCurrentFlowerNotes("");
@@ -387,6 +378,7 @@ export default function ComponentsPage() {
     setCategory(item.category || "Stages");
     setTheme(item.theme || "");
     setIsCustomCategory(false);
+    setCustomCategoryInput("");
     setBaseCost(item.baseCost || 0);
     setLength(item.dimensions?.length?.toString() || "");
     setWidth(item.dimensions?.width?.toString() || "");
@@ -394,7 +386,6 @@ export default function ComponentsPage() {
     setUnit(item.dimensions?.unit || "ft");
     setSelectedEvents(item.events || []);
 
-    // Clean duplicate props if any
     const deduplicatedElements: any[] = [];
     (item.warehouseElements || []).forEach((el: any) => {
       const idx = deduplicatedElements.findIndex((d) => d.elementId === el.elementId);
@@ -406,9 +397,7 @@ export default function ComponentsPage() {
     });
     setSelectedWarehouseElements(deduplicatedElements);
 
-    // Natural Flowers load
     setSelectedFlowers(item.naturalFlowers || []);
-
     setFreshPurchases(item.freshPurchases || []);
 
     const mappedRentals = (item.vendorRentals || []).map((r: any) => ({
@@ -446,6 +435,9 @@ export default function ComponentsPage() {
 
     try {
       const finalCategory = isCustomCategory ? customCategoryInput.trim() : category;
+      if (isCustomCategory && finalCategory && !categories.includes(finalCategory)) {
+        setCategories((prev) => [...prev, finalCategory]);
+      }
 
       let uploadedImageUrls: string[] = [...existingImages];
       for (const file of imageFiles) {
@@ -476,7 +468,7 @@ export default function ComponentsPage() {
           unit,
         },
         warehouseElements: selectedWarehouseElements,
-        naturalFlowers: selectedFlowers, // Saved Natural Flowers List
+        naturalFlowers: selectedFlowers,
         freshPurchases,
         vendorRentals,
         writtenInstructions,
@@ -507,7 +499,6 @@ export default function ComponentsPage() {
     }
   };
 
-  // Distinct Lists for 3-Way Filters
   const distinctCategories = ["All", ...Array.from(new Set(componentsList.map((c) => c.category).filter(Boolean)))];
   const distinctThemes = ["All", ...Array.from(new Set(componentsList.map((c) => c.theme).filter(Boolean)))];
   const distinctEvents = ["All", "Haldi", "Mehendi", "Sangeet", "Wedding", "Reception", "Cocktail", "Pool Party", "After Party"];
@@ -527,7 +518,6 @@ export default function ComponentsPage() {
     return matchesCat && matchesSearch;
   });
 
-  // Calculate live cumulative usage for currently selected prop
   const alreadyAddedQtyInCurrentComp = currentSelectedElement
     ? selectedWarehouseElements
         .filter((item) => item.elementId === currentSelectedElement.id)
@@ -538,9 +528,10 @@ export default function ComponentsPage() {
   const liveStockForSelected = currentSelectedElement ? getElementWarehouseStock(currentSelectedElement.id) : 0;
   const isSelectedProjectedShort = currentSelectedElement ? totalProjectedQty > liveStockForSelected : false;
 
-  // Selected Flower Preview Helper
   const currentFlowerObj = naturalFlowersLibrary.find((f) => f.id === currentFlowerId);
   const totalComponentFlowerEstimatedCost = selectedFlowers.reduce((sum, f) => sum + (Number(f.approxPrice) * Number(f.quantity)), 0);
+
+  const allAvailableEventTags = Array.from(new Set([...standardEventTypes, ...selectedEvents]));
 
   if (loading) return <div className="p-8 text-center text-xl font-bold">Loading components...</div>;
 
@@ -552,7 +543,7 @@ export default function ComponentsPage() {
           <div>
             <h1 className="text-3xl font-black text-gray-900">Components Master Library</h1>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Integrated with Natural Flowers Catalog, Warehouse Props, and 3-Way Filtering.
+              Organized by Category, Custom Themes, and Real-Time Warehouse Stock Validation.
             </p>
           </div>
           {role !== "sales" && (
@@ -720,11 +711,9 @@ export default function ComponentsPage() {
                       </div>
                     )}
 
-                    {/* ITEM BREAKDOWN */}
                     <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-lg text-xs font-semibold text-gray-700 space-y-1.5">
                       <p>📦 <strong>Warehouse Props:</strong> {comp.warehouseElements?.length || 0} items attached</p>
 
-                      {/* NATURAL FLOWERS BREAKDOWN ON CARD */}
                       {comp.naturalFlowers && comp.naturalFlowers.length > 0 ? (
                         <div className="bg-pink-50/70 border border-pink-200 p-1.5 rounded text-pink-950 text-[11px]">
                           <span className="font-black uppercase block text-[10px]">🌸 Natural Flowers ({comp.naturalFlowers.length}):</span>
@@ -803,8 +792,9 @@ export default function ComponentsPage() {
                       <select
                         value={isCustomCategory ? "custom" : category}
                         onChange={(e) => {
-                          if (e.target.value === "custom") setIsCustomCategory(true);
-                          else {
+                          if (e.target.value === "custom") {
+                            setIsCustomCategory(true);
+                          } else {
                             setIsCustomCategory(false);
                             setCategory(e.target.value);
                             if (!isEditing) setCode(generateComponentCode(e.target.value));
@@ -850,6 +840,25 @@ export default function ComponentsPage() {
                     </div>
                   </div>
 
+                  {/* CUSTOM CATEGORY INPUT */}
+                  {isCustomCategory && (
+                    <div className="bg-blue-50 p-3 rounded-xl border-2 border-blue-300">
+                      <label className="block text-xs font-black text-blue-950 mb-1">
+                        Enter New Custom Category Name *
+                      </label>
+                      <input
+                        required
+                        placeholder="e.g. Photo Booths, Dining Canopies, Mandaps"
+                        value={customCategoryInput}
+                        onChange={(e) => {
+                          setCustomCategoryInput(e.target.value);
+                          if (!isEditing) setCode(generateComponentCode(e.target.value));
+                        }}
+                        className="w-full border-2 border-blue-400 p-2 rounded-lg font-bold text-xs bg-white text-gray-900 outline-none"
+                      />
+                    </div>
+                  )}
+
                   {/* THEME */}
                   <div className="bg-purple-50 p-3.5 rounded-xl border-2 border-purple-200 space-y-1.5">
                     <label className="block text-xs font-black text-purple-950 uppercase">
@@ -874,22 +883,37 @@ export default function ComponentsPage() {
                     <label className="block text-xs font-black text-gray-800 uppercase">
                       🗓️ Assign Events (Select Multiple) *
                     </label>
+                    <p className="text-[11px] text-gray-600 font-medium">Click to select all events where this component can be deployed:</p>
 
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {standardEventTypes.map((ev) => {
+                      {allAvailableEventTags.map((ev) => {
                         const isSelected = selectedEvents.includes(ev);
+                        const isCustom = !standardEventTypes.includes(ev);
+
                         return (
                           <button
                             key={ev}
                             type="button"
                             onClick={() => toggleEvent(ev)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 ${
                               isSelected
                                 ? "bg-purple-700 text-white border-purple-800 shadow"
                                 : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                             }`}
                           >
-                            {isSelected ? "✓ " : "+ "} {ev}
+                            <span>{isSelected ? "✓ " : "+ "} {ev}</span>
+                            {isCustom && (
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedEvents(selectedEvents.filter((item) => item !== ev));
+                                }}
+                                className="text-red-200 hover:text-white font-black ml-1 text-xs"
+                                title="Delete custom event"
+                              >
+                                ✕
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -897,15 +921,15 @@ export default function ComponentsPage() {
 
                     <div className="flex gap-2 pt-2 border-t border-gray-200">
                       <input
-                        placeholder="Add other custom event..."
+                        placeholder="Add other custom event (e.g. Sufi Night, Carnival)..."
                         value={customEventInput}
                         onChange={(e) => setCustomEventInput(e.target.value)}
-                        className="flex-1 border p-1.5 rounded-lg text-xs font-bold bg-white"
+                        className="flex-1 border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white text-gray-900"
                       />
                       <button
                         type="button"
                         onClick={handleAddCustomEvent}
-                        className="bg-gray-900 text-white font-bold px-3 py-1.5 rounded-lg text-xs"
+                        className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs"
                       >
                         + Add Custom Event
                       </button>
@@ -1000,7 +1024,7 @@ export default function ComponentsPage() {
                         </div>
 
                         <div className="w-24">
-                          <label className="block text-[11px] font-black text-gray-700">Quantity *</label>
+                          <label className="block text-[11px] font-black text-gray-700">Quantity to Add *</label>
                           <input
                             type="number"
                             min="1"
@@ -1107,7 +1131,7 @@ export default function ComponentsPage() {
                   )}
                 </div>
 
-                {/* 4. STEP 2: NATURAL FLOWERS ASSIGNMENT */}
+                {/* 4. NATURAL FLOWERS REQUIREMENT */}
                 <div className="space-y-3 bg-pink-50/60 p-4 rounded-xl border-2 border-pink-300">
                   <div className="flex justify-between items-center">
                     <div>
@@ -1125,7 +1149,6 @@ export default function ComponentsPage() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white p-3 rounded-xl border border-pink-200">
-                    {/* Flower Dropdown */}
                     <div className="md:col-span-5">
                       <label className="block text-[11px] font-black text-gray-700 mb-0.5">Select Flower *</label>
                       <select
@@ -1142,7 +1165,6 @@ export default function ComponentsPage() {
                       </select>
                     </div>
 
-                    {/* Quantity */}
                     <div className="md:col-span-2">
                       <label className="block text-[11px] font-black text-gray-700 mb-0.5">
                         Qty {currentFlowerObj ? `(${currentFlowerObj.unit === "Custom" ? currentFlowerObj.customUnit : currentFlowerObj.unit})` : "*"}
@@ -1156,7 +1178,6 @@ export default function ComponentsPage() {
                       />
                     </div>
 
-                    {/* Placement Notes */}
                     <div className="md:col-span-3">
                       <label className="block text-[11px] font-black text-gray-700 mb-0.5">Usage / Placement Notes</label>
                       <input
@@ -1167,7 +1188,6 @@ export default function ComponentsPage() {
                       />
                     </div>
 
-                    {/* Add Button */}
                     <div className="md:col-span-2 flex items-end">
                       <button
                         type="button"
@@ -1179,7 +1199,6 @@ export default function ComponentsPage() {
                     </div>
                   </div>
 
-                  {/* Attached Flowers List */}
                   {selectedFlowers.length > 0 ? (
                     <div className="space-y-1.5 mt-2">
                       {selectedFlowers.map((f, idx) => (
@@ -1208,7 +1227,7 @@ export default function ComponentsPage() {
                   )}
                 </div>
 
-                {/* 5. General Fresh Buys (Non-Flower) & Rentals */}
+                {/* 5. General Fresh Buys & Rentals */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-green-50/50 p-4 rounded-xl border-2 border-green-300 space-y-2">
                     <h3 className="font-black text-green-900 text-xs uppercase">General Consumables (Flex, Candles, Thermocol)</h3>
@@ -1278,7 +1297,7 @@ export default function ComponentsPage() {
           </div>
         )}
 
-        {/* FULL SCREEN POPUP: PROPS PICKER */}
+        {/* FULL SCREEN POPUP: PROPS PICKER (SMOOTH SCROLLING, CONTENT-START, NEVER SQUEEZES) */}
         {showElementPickerModal && (
           <div className="fixed inset-0 z-50 bg-black/85 flex flex-col p-4 md:p-6 backdrop-blur-sm">
             <div className="w-full h-full max-w-7xl mx-auto bg-white rounded-2xl flex flex-col overflow-hidden shadow-2xl border-2 border-gray-400">
@@ -1288,40 +1307,59 @@ export default function ComponentsPage() {
                   <p className="text-xs font-bold text-gray-600">Click any prop below to assign it to this component.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <select value={elementPickerCategory} onChange={(e) => setElementPickerCategory(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white">
+                  <select value={elementPickerCategory} onChange={(e) => setElementPickerCategory(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg font-bold text-xs bg-white text-gray-900">
                     {elementCategories.map((cat) => (<option key={cat} value={cat}>{cat === "All" ? "✨ All Categories" : cat}</option>))}
                   </select>
-                  <input placeholder="Search name or SKU..." value={elementPickerSearch} onChange={(e) => setElementPickerSearch(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white" />
-                  <button type="button" onClick={() => setShowElementPickerModal(false)} className="bg-gray-900 text-white font-black px-4 py-2 rounded-lg text-xs">✕ Close</button>
+                  <input placeholder="Search name or SKU..." value={elementPickerSearch} onChange={(e) => setElementPickerSearch(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white text-gray-900" />
+                  <button type="button" onClick={() => setShowElementPickerModal(false)} className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs">✕ Close</button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {/* SMOOTH SCROLLABLE GRID: content-start ensures cards stack naturally without squashing */}
+              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 content-start">
                 {filteredElements.map((el) => {
                   const hasPic = el.images?.[0] || el.imageUrl;
                   const liveStock = Number(el.stock?.total ?? el.stockQuantity ?? 0);
 
                   return (
-                    <div key={el.id} onClick={() => { setCurrentSelectedElement(el); setShowElementPickerModal(false); }} className="bg-white border-2 border-gray-300 hover:border-amber-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between">
+                    <div
+                      key={el.id}
+                      onClick={() => { setCurrentSelectedElement(el); setShowElementPickerModal(false); }}
+                      className="bg-white border-2 border-gray-300 hover:border-amber-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between min-h-[310px]"
+                    >
                       <div>
-                        <div className="h-36 bg-gray-100 relative overflow-hidden">
-                          {hasPic ? (<img src={hasPic} alt={el.name} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />) : (<div className="h-full flex items-center justify-center text-xs font-bold text-gray-400">No Photo</div>)}
-                          <span className="absolute top-1.5 right-1.5 bg-gray-900/90 text-white text-[10px] font-mono font-bold px-1.5 py-0.5 rounded">{el.sku || "PROP"}</span>
+                        <div className="h-44 w-full bg-gray-100 relative overflow-hidden flex items-center justify-center flex-shrink-0">
+                          {hasPic ? (
+                            <img src={hasPic} alt={el.name} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+                          ) : (
+                            <div className="h-full flex items-center justify-center text-xs font-bold text-gray-400">No Photo</div>
+                          )}
+                          <span className="absolute top-2 right-2 bg-gray-900/90 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded shadow">{el.sku || "PROP"}</span>
                         </div>
-                        <div className="p-3">
-                          <span className="text-[10px] font-black uppercase text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">{el.category}</span>
-                          <h4 className="font-black text-sm text-gray-900 mt-1 leading-tight group-hover:text-amber-800">{el.name}</h4>
-                          <p className="text-[11px] text-gray-600 font-bold mt-1">
+
+                        <div className="p-3.5 space-y-1">
+                          <span className="text-[10px] font-black uppercase text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">{el.category}</span>
+                          <h4 className="font-black text-sm text-gray-900 mt-1 leading-snug group-hover:text-amber-800 line-clamp-2">{el.name}</h4>
+                          <p className="text-[11px] text-gray-600 font-bold pt-1">
                             📦 Warehouse Stock: <strong className={liveStock > 0 ? "text-blue-700" : "text-red-600 font-black"}>{liveStock} units</strong>
                           </p>
                         </div>
                       </div>
-                      <div className="p-2 border-t bg-gray-50">
-                        <button type="button" className="w-full bg-amber-700 group-hover:bg-amber-800 text-white font-black py-1.5 rounded text-xs transition">Select This Prop ✓</button>
+
+                      <div className="p-2.5 border-t bg-gray-50">
+                        <button type="button" className="w-full bg-amber-700 group-hover:bg-amber-800 text-white font-black py-2 rounded-lg text-xs transition shadow">
+                          Select This Prop ✓
+                        </button>
                       </div>
                     </div>
                   );
                 })}
+
+                {filteredElements.length === 0 && (
+                  <div className="col-span-full py-16 text-center text-gray-500 font-bold">
+                    No elements found matching this filter.
+                  </div>
+                )}
               </div>
             </div>
           </div>

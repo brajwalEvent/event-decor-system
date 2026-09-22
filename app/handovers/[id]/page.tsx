@@ -38,7 +38,7 @@ export default function HandoverWorkspace() {
   // Selection
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
   const [selectedEventIndex, setSelectedEventIndex] = useState<number>(0);
-  const [eventScopeTab, setEventScopeTab] = useState<"decor" | "entertainment">("decor");
+  const [eventScopeTab, setEventScopeTab] = useState<"decor" | "entertainment" | "floorplan">("decor");
 
   // FULL SCREEN COMPONENT PICKER POPUP (WITH 3-WAY FILTER)
   const [showComponentPickerModal, setShowComponentPickerModal] = useState(false);
@@ -84,6 +84,14 @@ export default function HandoverWorkspace() {
   // Production Remark Modal State
   const [editingRemarkItem, setEditingRemarkItem] = useState<{ type: 'decor' | 'ent', index: number, currentRemark: string } | null>(null);
   const [remarkText, setRemarkText] = useState("");
+
+  // FLOOR PLAN STATES (PLANNER 5D)
+  const [plan2dFile, setPlan2dFile] = useState<File | null>(null);
+  const [plan3dFile, setPlan3dFile] = useState<File | null>(null);
+  const [planner5dLink, setPlanner5dLink] = useState("");
+  const [planNotes, setPlanNotes] = useState("");
+  const [uploadingPlans, setUploadingPlans] = useState(false);
+  const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
 
   const isProductionOrAdmin = isSuperAdmin || role === "production" || role === "admin";
   const isSales = role === "sales";
@@ -262,6 +270,7 @@ export default function HandoverWorkspace() {
         setupReadyTime: ev.setupReadyTime || "",
         colorThemes: JSON.parse(JSON.stringify(ev.colorThemes || [])),
         decorComponents: JSON.parse(JSON.stringify(ev.decorComponents || [])),
+        floorPlans: ev.floorPlans ? JSON.parse(JSON.stringify(ev.floorPlans)) : null,
         entertainmentElements: [],
       })),
     }));
@@ -300,6 +309,7 @@ export default function HandoverWorkspace() {
       setupReadyTime: sourceEvent.setupReadyTime || "",
       colorThemes: JSON.parse(JSON.stringify(sourceEvent.colorThemes || [])),
       decorComponents: JSON.parse(JSON.stringify(sourceEvent.decorComponents || [])),
+      floorPlans: sourceEvent.floorPlans ? JSON.parse(JSON.stringify(sourceEvent.floorPlans)) : null,
       entertainmentElements: [],
     };
 
@@ -314,6 +324,69 @@ export default function HandoverWorkspace() {
     setShowImportModal(false);
     setSelectedEventIndex(updatedDays[selectedDayIndex].events.length - 1);
     alert(`🎉 Successfully imported "${sourceEvent.eventName}"!`);
+  };
+
+  // Floor Plan Upload (Backend Team)
+  const handleUploadFloorPlans = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUploadingPlans(true);
+
+    try {
+      let plan2dUrl = currentEvent.floorPlans?.plan2dUrl || "";
+      let plan3dUrl = currentEvent.floorPlans?.plan3dUrl || "";
+
+      if (plan2dFile) {
+        const fileRef = ref(storage, `floorplans/${Date.now()}_2d_${plan2dFile.name}`);
+        await uploadBytes(fileRef, plan2dFile);
+        plan2dUrl = await getDownloadURL(fileRef);
+      }
+
+      if (plan3dFile) {
+        const fileRef = ref(storage, `floorplans/${Date.now()}_3d_${plan3dFile.name}`);
+        await uploadBytes(fileRef, plan3dFile);
+        plan3dUrl = await getDownloadURL(fileRef);
+      }
+
+      const updatedDays = [...handover.days];
+      const targetEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
+
+      targetEvent.floorPlans = {
+        plan2dUrl,
+        plan3dUrl,
+        planner5dLink: planner5dLink.trim() || targetEvent.floorPlans?.planner5dLink || "",
+        notes: planNotes.trim() || targetEvent.floorPlans?.notes || "",
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.email,
+      };
+
+      await updateHandoverDaysInDb(updatedDays, `Uploaded Floor Plans for ${targetEvent.eventName}`);
+
+      setPlan2dFile(null);
+      setPlan3dFile(null);
+      setPlanner5dLink("");
+      setPlanNotes("");
+      alert("✅ 2D / 3D Floor plans saved successfully!");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to upload floor plans.");
+    } finally {
+      setUploadingPlans(false);
+    }
+  };
+
+  const handleDelete2dPlan = async () => {
+    if (!window.confirm("Delete the 2D Floor Plan for this event?")) return;
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].floorPlans.plan2dUrl = "";
+    await updateHandoverDaysInDb(updatedDays, `Deleted 2D plan for ${currentEvent.eventName}`);
+  };
+
+  const handleDelete3dPlan = async () => {
+    if (!window.confirm("Delete the 3D Floor Plan for this event?")) return;
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].floorPlans.plan3dUrl = "";
+    updatedDays[selectedDayIndex].events[selectedEventIndex].floorPlans.planner5dLink = "";
+    await updateHandoverDaysInDb(updatedDays, `Deleted 3D plan for ${currentEvent.eventName}`);
   };
 
   // Days & Events CRUD
@@ -346,6 +419,7 @@ export default function HandoverWorkspace() {
       setupReadyTime: newEventReadyTime.trim(),
       colorThemes: [],
       decorComponents: [],
+      floorPlans: null,
       entertainmentElements: [],
     });
 
@@ -366,7 +440,7 @@ export default function HandoverWorkspace() {
     setSelectedEventIndex(0);
   };
 
-  // Color Themes
+  // Colors
   const handleAddColorTheme = async () => {
     const updatedDays = [...handover.days];
     const currentEvent = updatedDays[selectedDayIndex]?.events[selectedEventIndex];
@@ -426,10 +500,10 @@ export default function HandoverWorkspace() {
     }
 
     const updatedDays = [...handover.days];
-    const currentEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
-    if (!currentEvent.decorComponents) currentEvent.decorComponents = [];
+    const targetEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
+    if (!targetEvent.decorComponents) targetEvent.decorComponents = [];
 
-    currentEvent.decorComponents.push({
+    targetEvent.decorComponents.push({
       componentId: currentSelectedComponent.id,
       name: currentSelectedComponent.name,
       category: currentSelectedComponent.category,
@@ -481,10 +555,10 @@ export default function HandoverWorkspace() {
     }
 
     const updatedDays = [...handover.days];
-    const currentEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
-    if (!currentEvent.entertainmentElements) currentEvent.entertainmentElements = [];
+    const targetEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
+    if (!targetEvent.entertainmentElements) targetEvent.entertainmentElements = [];
 
-    currentEvent.entertainmentElements.push({
+    targetEvent.entertainmentElements.push({
       entertainmentId: master.id,
       name: master.name,
       category: master.category,
@@ -513,17 +587,17 @@ export default function HandoverWorkspace() {
   const handleSaveProductionRemark = async () => {
     if (!editingRemarkItem) return;
     const updatedDays = [...handover.days];
-    const event = updatedDays[selectedDayIndex].events[selectedEventIndex];
+    const targetEvent = updatedDays[selectedDayIndex].events[selectedEventIndex];
 
     if (editingRemarkItem.type === "decor") {
-      event.decorComponents[editingRemarkItem.index].productionRemarks = remarkText.trim();
+      targetEvent.decorComponents[editingRemarkItem.index].productionRemarks = remarkText.trim();
     } else {
-      event.entertainmentElements[editingRemarkItem.index].productionRemarks = remarkText.trim();
+      targetEvent.entertainmentElements[editingRemarkItem.index].productionRemarks = remarkText.trim();
     }
 
     await updateHandoverDaysInDb(updatedDays);
     await logModification(
-      `Added Production Remark on ${editingRemarkItem.type === "decor" ? event.decorComponents[editingRemarkItem.index].name : event.entertainmentElements[editingRemarkItem.index].name}`,
+      `Added Production Remark on ${editingRemarkItem.type === "decor" ? targetEvent.decorComponents[editingRemarkItem.index].name : targetEvent.entertainmentElements[editingRemarkItem.index].name}`,
       remarkText.trim()
     );
     setEditingRemarkItem(null);
@@ -603,9 +677,8 @@ export default function HandoverWorkspace() {
   const taggableItems = getAllTaggableItems();
   const selectedSourceWeddingObj = allOtherHandovers.find((w) => w.id === selectedSourceHandoverId);
 
-  // RUN REAL-TIME SAME-EVENT STOCK CONFLICT CHECK FOR CURRENT EVENT
+  // Real-time same-event stock conflict calculation
   const currentEventStockConflicts = calculateEventStockConflicts(currentEvent);
-
   const canDeleteWedding = isSuperAdmin || role === "admin" || (role === "sales" && handover.status === "Draft");
 
   return (
@@ -698,7 +771,7 @@ export default function HandoverWorkspace() {
               📑 PDF & Deck
             </button>
 
-{/* 🌸 FLOWER PROCUREMENT SHEET BUTTON */}
+            {/* Flower Sheet */}
             <button
               onClick={() => router.push(`/handovers/${handoverId}/flowers-sheet`)}
               className="bg-pink-700 hover:bg-pink-800 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
@@ -706,7 +779,7 @@ export default function HandoverWorkspace() {
               🌸 Flower Sheet & PDF
             </button>
 
-            {/* 👷 LABOR & OPERATIONS PLANNER BUTTON */}
+            {/* Labor Planner */}
             <button
               onClick={() => router.push(`/handovers/${handoverId}/labor-planner`)}
               className="bg-amber-600 hover:bg-amber-700 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
@@ -714,7 +787,7 @@ export default function HandoverWorkspace() {
               👷 Labor Planner & PDF
             </button>
 
-            {/* 🎤 ENTERTAINMENT & SFX SHEET BUTTON */}
+            {/* Entertainment & SFX Sheet */}
             <button
               onClick={() => router.push(`/handovers/${handoverId}/entertainment-sheet`)}
               className="bg-purple-800 hover:bg-purple-900 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
@@ -893,8 +966,8 @@ export default function HandoverWorkspace() {
 
                   <div className="space-y-1.5">
                     {currentDay.events?.map((ev: any, idx: number) => {
-                      // Check if this sub-event has stock conflict
                       const conflictsInEv = calculateEventStockConflicts(ev);
+                      const hasFloorPlans = ev.floorPlans?.plan2dUrl || ev.floorPlans?.plan3dUrl || ev.floorPlans?.planner5dLink;
 
                       return (
                         <div
@@ -912,6 +985,9 @@ export default function HandoverWorkspace() {
                                 <span className="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded animate-pulse">
                                   ⚠️ Stock Conflict
                                 </span>
+                              )}
+                              {hasFloorPlans && (
+                                <span className="text-[10px]" title="Has 2D/3D Floor Plan">📐</span>
                               )}
                             </div>
                             <p className="text-[11px] text-gray-500 font-semibold">
@@ -946,14 +1022,26 @@ export default function HandoverWorkspace() {
                       <h2 className="text-2xl font-black text-gray-900">{currentEvent.eventName} Scope</h2>
                     </div>
 
-                    <div className="flex bg-gray-100 p-1 rounded-lg border">
+                    {/* SUB-TABS: DECOR vs FLOOR PLANS vs ENTERTAINMENT */}
+                    <div className="flex bg-gray-100 p-1 rounded-lg border flex-wrap">
                       <button
                         onClick={() => setEventScopeTab("decor")}
                         className={`px-3 py-1.5 rounded text-xs font-black transition ${
                           eventScopeTab === "decor" ? "bg-white text-blue-700 shadow" : "text-gray-600"
                         }`}
                       >
-                        🏛️ Decor Components ({currentEvent.decorComponents?.length || 0})
+                        🏛️ Decor ({currentEvent.decorComponents?.length || 0})
+                      </button>
+                      <button
+                        onClick={() => setEventScopeTab("floorplan")}
+                        className={`px-3 py-1.5 rounded text-xs font-black transition flex items-center gap-1 ${
+                          eventScopeTab === "floorplan" ? "bg-white text-emerald-700 shadow" : "text-gray-600"
+                        }`}
+                      >
+                        📐 2D / 3D Plans
+                        {(currentEvent.floorPlans?.plan2dUrl || currentEvent.floorPlans?.plan3dUrl || currentEvent.floorPlans?.planner5dLink) && (
+                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        )}
                       </button>
                       <button
                         onClick={() => setEventScopeTab("entertainment")}
@@ -961,7 +1049,7 @@ export default function HandoverWorkspace() {
                           eventScopeTab === "entertainment" ? "bg-white text-purple-700 shadow" : "text-gray-600"
                         }`}
                       >
-                        🎤 Entertainment & SFX ({currentEvent.entertainmentElements?.length || 0})
+                        🎤 SFX ({currentEvent.entertainmentElements?.length || 0})
                       </button>
                     </div>
                   </div>
@@ -1145,7 +1233,6 @@ export default function HandoverWorkspace() {
                       {/* Items Cards */}
                       <div className="space-y-4">
                         {currentEvent.decorComponents?.map((item: any, idx: number) => {
-                          // Check if this component has items involved in the same-event conflict
                           const master = componentsLibrary.find((c) => c.id === item.componentId);
                           const hasConflictingProps = master?.warehouseElements?.some((we: any) =>
                             currentEventStockConflicts.some((conf: any) => conf.elementId === we.elementId)
@@ -1173,7 +1260,6 @@ export default function HandoverWorkspace() {
                                           🎨 {item.theme}
                                         </span>
                                       )}
-                                      {/* COMPONENT SHORTAGE WARNING BADGE */}
                                       {hasConflictingProps && (
                                         <span className="bg-red-600 text-white font-black text-[10px] px-2 py-0.5 rounded animate-pulse shadow">
                                           🚨 Shared Prop Shortage in this Event!
@@ -1215,6 +1301,7 @@ export default function HandoverWorkspace() {
                                 </p>
                               </div>
 
+                              {/* Audio Note Player */}
                               {item.audioUrl && (
                                 <audio controls src={item.audioUrl} className="w-full h-8" />
                               )}
@@ -1225,7 +1312,188 @@ export default function HandoverWorkspace() {
                     </div>
                   )}
 
-                  {/* TAB 2: ENTERTAINMENT */}
+                  {/* TAB 2: FLOOR PLANS (PLANNER 5D) */}
+                  {eventScopeTab === "floorplan" && (
+                    <div className="space-y-6">
+                      {/* Existing Plans Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 2D Plan Card */}
+                        <div className="bg-white border-2 border-emerald-300 rounded-xl p-4 space-y-3 shadow-sm flex flex-col justify-between">
+                          <div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="text-xs font-black uppercase text-emerald-900 flex items-center gap-1.5">
+                                📐 2D Layout Blueprint
+                              </span>
+                              {currentEvent.floorPlans?.plan2dUrl && isProductionOrAdmin && (
+                                <button
+                                  onClick={handleDelete2dPlan}
+                                  className="text-red-600 font-bold text-xs hover:underline"
+                                >
+                                  Delete 2D
+                                </button>
+                              )}
+                            </div>
+
+                            {currentEvent.floorPlans?.plan2dUrl ? (
+                              <div className="mt-3 space-y-2">
+                                <div
+                                  onClick={() => setLightboxImageUrl(currentEvent.floorPlans.plan2dUrl)}
+                                  className="h-48 w-full bg-gray-100 rounded-lg overflow-hidden border cursor-zoom-in relative group"
+                                >
+                                  <img
+                                    src={currentEvent.floorPlans.plan2dUrl}
+                                    alt="2D Plan"
+                                    className="w-full h-full object-contain bg-white"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition flex items-center justify-center">
+                                    <span className="opacity-0 group-hover:opacity-100 bg-black/80 text-white text-xs font-bold px-3 py-1 rounded-full">
+                                      🔍 View Fullscreen
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <a
+                                  href={currentEvent.floorPlans.plan2dUrl}
+                                  download={`2D_Plan_${currentEvent.eventName}.jpg`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block text-center bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded-lg text-xs shadow"
+                                >
+                                  ⬇️ Download 2D Plan File
+                                </a>
+                              </div>
+                            ) : (
+                              <div className="py-12 text-center text-gray-400 text-xs font-bold italic">
+                                No 2D plan uploaded for {currentEvent.eventName} yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 3D Plan / Planner 5D Card */}
+                        <div className="bg-white border-2 border-blue-300 rounded-xl p-4 space-y-3 shadow-sm flex flex-col justify-between">
+                          <div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="text-xs font-black uppercase text-blue-900 flex items-center gap-1.5">
+                                🏢 3D Walkthrough / Render
+                              </span>
+                              {(currentEvent.floorPlans?.plan3dUrl || currentEvent.floorPlans?.planner5dLink) && isProductionOrAdmin && (
+                                <button
+                                  onClick={handleDelete3dPlan}
+                                  className="text-red-600 font-bold text-xs hover:underline"
+                                >
+                                  Delete 3D
+                                </button>
+                              )}
+                            </div>
+
+                            {currentEvent.floorPlans?.plan3dUrl ? (
+                              <div className="mt-3 space-y-2">
+                                <div
+                                  onClick={() => setLightboxImageUrl(currentEvent.floorPlans.plan3dUrl)}
+                                  className="h-48 w-full bg-gray-100 rounded-lg overflow-hidden border cursor-zoom-in relative group"
+                                >
+                                  <img
+                                    src={currentEvent.floorPlans.plan3dUrl}
+                                    alt="3D Render"
+                                    className="w-full h-full object-contain bg-white"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition flex items-center justify-center">
+                                    <span className="opacity-0 group-hover:opacity-100 bg-black/80 text-white text-xs font-bold px-3 py-1 rounded-full">
+                                      🔍 View Fullscreen
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {currentEvent.floorPlans?.planner5dLink && (
+                              <div className="mt-3">
+                                <a
+                                  href={currentEvent.floorPlans.planner5dLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-xs shadow"
+                                >
+                                  🌐 Open Interactive Planner 5D Web View ↗
+                                </a>
+                              </div>
+                            )}
+
+                            {!currentEvent.floorPlans?.plan3dUrl && !currentEvent.floorPlans?.planner5dLink && (
+                              <div className="py-12 text-center text-gray-400 text-xs font-bold italic">
+                                No 3D model or link assigned yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Backend Team Upload Panel */}
+                      {isProductionOrAdmin && (
+                        <div className="bg-emerald-50/60 border-2 border-emerald-300 rounded-xl p-5 space-y-4 shadow-sm">
+                          <div>
+                            <h4 className="font-black text-sm text-emerald-950 uppercase">
+                              📤 Production Team: Upload Event Floor Plans (Planner 5D)
+                            </h4>
+                            <p className="text-xs text-emerald-800">
+                              Attach 2D layout image, 3D perspective render, or interactive Planner 5D web sharing link.
+                            </p>
+                          </div>
+
+                          <form onSubmit={handleUploadFloorPlans} className="space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="bg-white p-3 rounded-lg border">
+                                <label className="block text-xs font-black text-gray-800 mb-1">
+                                  Upload 2D Floor Plan (Image / PDF)
+                                </label>
+                                <input
+                                  type="file"
+                                  accept="image/*,.pdf"
+                                  onChange={(e) => setPlan2dFile(e.target.files ? e.target.files[0] : null)}
+                                  className="block w-full text-xs"
+                                />
+                              </div>
+
+                              <div className="bg-white p-3 rounded-lg border">
+                                <label className="block text-xs font-black text-gray-800 mb-1">
+                                  Upload 3D Render Image
+                                </label>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) => setPlan3dFile(e.target.files ? e.target.files[0] : null)}
+                                  className="block w-full text-xs"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-black text-gray-800 mb-1">
+                                Planner 5D Interactive Web Sharing Link (Optional)
+                              </label>
+                              <input
+                                placeholder="https://planner5d.com/v/?key=..."
+                                value={planner5dLink}
+                                onChange={(e) => setPlanner5dLink(e.target.value)}
+                                className="w-full border-2 border-gray-300 p-2 rounded-lg text-xs font-medium bg-white"
+                              />
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={uploadingPlans || (!plan2dFile && !plan3dFile && !planner5dLink)}
+                              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-5 py-2.5 rounded-lg text-xs shadow disabled:opacity-50"
+                            >
+                              {uploadingPlans ? "Uploading Plans to Cloud..." : "💾 Save Event Floor Plans"}
+                            </button>
+                          </form>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 3: ENTERTAINMENT */}
                   {eventScopeTab === "entertainment" && (
                     <div className="space-y-6">
                       <div className="bg-purple-50/50 p-4 rounded-xl border-2 border-purple-200 space-y-3">
@@ -1681,6 +1949,22 @@ export default function HandoverWorkspace() {
                 <button onClick={handleSaveProductionRemark} className="px-4 py-1.5 bg-blue-700 text-white font-black rounded text-xs">Save Remark</button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* FULL SCREEN LIGHTBOX MODAL FOR FLOOR PLANS */}
+        {lightboxImageUrl && (
+          <div
+            onClick={() => setLightboxImageUrl(null)}
+            className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4 cursor-zoom-out"
+          >
+            <button
+              onClick={() => setLightboxImageUrl(null)}
+              className="absolute top-4 right-4 bg-white/20 hover:bg-red-600 text-white font-black px-4 py-2 rounded-full text-xs transition"
+            >
+              ✕ Close
+            </button>
+            <img src={lightboxImageUrl} alt="Fullscreen Plan" className="max-w-full max-h-[85vh] object-contain rounded-xl bg-white" />
           </div>
         )}
       </div>
