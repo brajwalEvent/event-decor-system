@@ -1325,7 +1325,7 @@ export default function ComponentsPage() {
                     <div
                       key={el.id}
                       onClick={() => { setCurrentSelectedElement(el); setShowElementPickerModal(false); }}
-                      className="bg-white border-2 border-gray-300 hover:border-amber-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between min-h-[310px]"
+                      className="bg-white border-2 border-gray-300 hover:border-amber-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between h-auto min-h-[360px]"
                     >
                       <div>
                         <div className="h-44 w-full bg-gray-100 relative overflow-hidden flex items-center justify-center flex-shrink-0">
