@@ -453,6 +453,12 @@ export default function LeadQuotationWorkspace() {
     setMilestoneDate("");
     setMilestoneDesc("");
   };
+ 
+    // DELETE / REMOVE MILESTONE
+  const handleRemoveMilestone = (id: string) => {
+    setPaymentMilestones(paymentMilestones.filter((m) => m.id !== id));
+  };
+
 
   const handleAddReceivedPayment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -472,6 +478,12 @@ export default function LeadQuotationWorkspace() {
     setPayAmount(0);
     setPayDate("");
     setPayRef("");
+  };
+  
+   // DELETE / REMOVE RECEIVED PAYMENT
+  const handleDeleteReceivedPayment = (id: string) => {
+    if (!window.confirm("Delete this payment entry?")) return;
+    setReceivedPayments(receivedPayments.filter((p) => p.id !== id));
   };
 
   // Financial Calculations
