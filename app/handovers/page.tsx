@@ -20,13 +20,17 @@ export default function HandoversDashboard() {
 
   const [handovers, setHandovers] = useState<any[]>([]);
   const [salesTeam, setSalesTeam] = useState<any[]>([]);
+  const [crmLeads, setCrmLeads] = useState<any[]>([]); // Fetched CRM Leads
   
   // Modals
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   const [showSalesModal, setShowSalesModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // New Handover Form State
+  // Selected CRM Lead for Migration
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+
+  // Handover Form State
   const [brideName, setBrideName] = useState("");
   const [groomName, setGroomName] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -47,7 +51,6 @@ export default function HandoversDashboard() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Fetch Handovers and Sales Team Members
   const fetchData = async () => {
     try {
       // 1. Fetch Handovers
@@ -55,10 +58,15 @@ export default function HandoversDashboard() {
       const hSnap = await getDocs(hQ);
       setHandovers(hSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      // 2. Fetch Sales Team Members
+      // 2. Fetch Sales Team
       const sQ = query(collection(db, "sales_team"), orderBy("name", "asc"));
       const sSnap = await getDocs(sQ);
       setSalesTeam(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      // 3. Fetch CRM Leads for one-click migration
+      const lQ = query(collection(db, "leads"), orderBy("createdAt", "desc"));
+      const lSnap = await getDocs(lQ);
+      setCrmLeads(lSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error("Error loading data:", err);
     }
@@ -68,7 +76,27 @@ export default function HandoversDashboard() {
     if (user) fetchData();
   }, [user]);
 
-  // Create Sales Member
+  // When a CRM Lead is chosen in dropdown, auto-fill all data
+  const handleSelectLeadToMigrate = (leadId: string) => {
+    setSelectedLeadId(leadId);
+    const selected = crmLeads.find((l) => l.id === leadId);
+    if (!selected) return;
+
+    setBrideName(selected.brideName || "");
+    setGroomName(selected.groomName || "");
+    setStartDate(selected.startDate || "");
+    setEndDate(selected.endDate || "");
+    setPaxCount(Number(selected.paxCount) || 300);
+    setResortName(selected.resortName || "");
+    setFamilyPocName(selected.familyPoc?.name || "");
+    setFamilyPocPhone(selected.familyPoc?.phone || "");
+
+    const matchingSales = salesTeam.find((s) => s.id === selected.salesLead?.id || s.name === selected.salesLead?.name);
+    if (matchingSales) {
+      setSelectedSalesPersonId(matchingSales.id);
+    }
+  };
+
   const handleCreateSalesMember = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -89,13 +117,24 @@ export default function HandoversDashboard() {
     }
   };
 
-  // Create New Wedding Handover
+  // Create Handover (MIGRATES QUOTATION DATA)
   const handleCreateHandover = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
     try {
       const selectedSales = salesTeam.find((s) => s.id === selectedSalesPersonId);
+      const chosenLead = crmLeads.find((l) => l.id === selectedLeadId);
+
+      // 1. MIGRATE WEDDING-WIDE ESSENTIALS FROM QUOTATION
+      const migratedWeddingWideItems = chosenLead?.quotation?.weddingWideItems
+        ? JSON.parse(JSON.stringify(chosenLead.quotation.weddingWideItems))
+        : [];
+
+      // 2. PASS QUOTATION EVENTS DATA TO HANDOVER FOR SUB-EVENT MIGRATION
+      const quotationEventsData = chosenLead?.quotation?.events
+        ? JSON.parse(JSON.stringify(chosenLead.quotation.events))
+        : [];
 
       const handoverData = {
         title: `${brideName.trim()} & ${groomName.trim()} Wedding`,
@@ -115,8 +154,11 @@ export default function HandoversDashboard() {
           phone: selectedSales?.phone || "",
           designation: selectedSales?.designation || "",
         },
-        status: "Draft", // Statuses: "Draft", "Submitted to Backend", "In Production", "Completed"
-        days: [], // Hierarchical event days will be populated in the builder
+        status: "Draft",
+        days: [],
+        generalWeddingElements: migratedWeddingWideItems, // Auto-migrated wedding-wide items!
+        quotationEvents: quotationEventsData, // Stored to migrate event items upon event creation
+        linkedLeadId: selectedLeadId || null,
         createdAt: new Date().toISOString(),
         createdBy: user?.email || "",
       };
@@ -152,7 +194,7 @@ export default function HandoversDashboard() {
           <div>
             <h1 className="text-3xl font-black text-gray-900">Wedding Handover Center</h1>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Sales-to-Backend project transfers, day-wise decor scopes & execution trail.
+              Sales-to-Backend project transfers, quotation migration & execution trail.
             </p>
           </div>
 
@@ -164,10 +206,21 @@ export default function HandoversDashboard() {
               👤 Add Sales Team Member
             </button>
             <button
-              onClick={() => setShowHandoverModal(true)}
+              onClick={() => {
+                setSelectedLeadId("");
+                setBrideName("");
+                setGroomName("");
+                setStartDate("");
+                setEndDate("");
+                setPaxCount(300);
+                setResortName("");
+                setFamilyPocName("");
+                setFamilyPocPhone("");
+                setShowHandoverModal(true);
+              }}
               className="bg-purple-700 hover:bg-purple-800 text-white font-black px-6 py-2.5 rounded-lg text-sm shadow transition"
             >
-              + New Wedding Handover
+              + Create Handover from Lead
             </button>
           </div>
         </div>
@@ -178,7 +231,7 @@ export default function HandoversDashboard() {
             const statusColors: any = {
               Draft: "bg-gray-100 text-gray-800 border-gray-300",
               "Submitted to Backend": "bg-amber-100 text-amber-900 border-amber-300 animate-pulse",
-              "In Production": "bg-green-100 text-green-900 border-green-300 font-black",
+              "Approved for Production": "bg-green-100 text-green-900 border-green-400 font-black",
             };
 
             return (
@@ -206,20 +259,14 @@ export default function HandoversDashboard() {
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs font-medium space-y-1.5 text-gray-700">
-                    <p>
-                      📅 <strong>Dates:</strong> {h.startDate} to {h.endDate}
-                    </p>
-                    <p>
-                      👨‍👩‍👧 <strong>Family POC:</strong> {h.familyPoc?.name || "N/A"} ({h.familyPoc?.phone || "N/A"})
-                    </p>
-                    <p>
-                      💼 <strong>Sales Lead:</strong> {h.salesLead?.name || "Direct"} - {h.salesLead?.phone}
-                    </p>
+                    <p>📅 <strong>Dates:</strong> {h.startDate} to {h.endDate}</p>
+                    <p>👨‍👩‍👧 <strong>Family POC:</strong> {h.familyPoc?.name || "N/A"} ({h.familyPoc?.phone || "N/A"})</p>
+                    <p>💼 <strong>Sales Lead:</strong> {h.salesLead?.name || "Direct"} - {h.salesLead?.phone}</p>
                   </div>
                 </div>
 
+                {/* ACTION BUTTONS */}
                 <div className="mt-5 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2">
-                  {/* Button 1: Open the workspace to edit */}
                   <Link
                     href={`/handovers/${h.id}`}
                     className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-2 px-3 rounded-lg text-center text-xs transition"
@@ -227,7 +274,6 @@ export default function HandoversDashboard() {
                     Open Workspace →
                   </Link>
 
-                  {/* Button 2: Direct Presentation Deck & PDF Download */}
                   <Link
                     href={`/handovers/${h.id}/presentation`}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-black py-2 px-3 rounded-lg text-center text-xs transition flex items-center gap-1 shadow"
@@ -235,7 +281,6 @@ export default function HandoversDashboard() {
                     📑 PDF & Deck
                   </Link>
 
-                  {/* Button 3: Admin Delete */}
                   {role === "admin" && (
                     <button
                       onClick={() => handleDeleteHandover(h.id, h.title)}
@@ -250,24 +295,37 @@ export default function HandoversDashboard() {
           })}
         </div>
 
-        {handovers.length === 0 && (
-          <div className="text-center py-16 bg-white border-2 border-dashed border-gray-300 rounded-xl">
-            <p className="text-gray-600 font-bold text-lg">No wedding handovers created yet.</p>
-            <p className="text-gray-400 text-sm mt-1">
-              Click "+ New Wedding Handover" to begin planning your first event transfer.
-            </p>
-          </div>
-        )}
-
-        {/* MODAL 1: Create New Wedding Handover */}
+        {/* MODAL: CREATE HANDOVER (FROM CRM LEAD) */}
         {showHandoverModal && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-xl max-w-xl w-full p-6 max-h-[92vh] overflow-y-auto border-2 border-gray-400 shadow-2xl">
-              <h2 className="text-2xl font-black text-gray-900 mb-4 border-b pb-2">
-                Initiate New Wedding Handover
+              <h2 className="text-2xl font-black text-gray-900 mb-2 border-b pb-2">
+                Create Handover from Client Lead
               </h2>
+              <p className="text-xs text-gray-600 mb-4">
+                Select an existing lead from your CRM. Couple details, venue, and quotation items will be automatically migrated.
+              </p>
 
               <form onSubmit={handleCreateHandover} className="space-y-4">
+                {/* 1. SELECT FROM CRM LEADS */}
+                <div className="bg-purple-50 p-3.5 rounded-xl border-2 border-purple-300">
+                  <label className="block text-xs font-black text-purple-950 mb-1">
+                    Select Client from CRM Leads *
+                  </label>
+                  <select
+                    value={selectedLeadId}
+                    onChange={(e) => handleSelectLeadToMigrate(e.target.value)}
+                    className="w-full border-2 border-purple-400 p-2 rounded-lg font-bold text-xs bg-white text-gray-900 outline-none"
+                  >
+                    <option value="">-- Choose Lead to Auto-Fill & Migrate --</option>
+                    {crmLeads.map((lead) => (
+                      <option key={lead.id} value={lead.id}>
+                        [{lead.status}] {lead.title} ({lead.resortName || "Venue"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-black text-gray-800 mb-1">Bride's Name *</label>
@@ -358,7 +416,7 @@ export default function HandoversDashboard() {
                   </div>
                 </div>
 
-                {/* Sales Person Dropdown */}
+                {/* Sales Lead */}
                 <div>
                   <label className="block text-xs font-black text-gray-800 mb-1">
                     Handling Sales Lead *
@@ -376,11 +434,6 @@ export default function HandoversDashboard() {
                       </option>
                     ))}
                   </select>
-                  {salesTeam.length === 0 && (
-                    <p className="text-[11px] text-red-600 mt-1">
-                      No sales members registered yet. Click "Add Sales Team Member" first.
-                    </p>
-                  )}
                 </div>
 
                 <div className="flex justify-end gap-2 pt-4 border-t">
@@ -396,7 +449,7 @@ export default function HandoversDashboard() {
                     disabled={submitting}
                     className="px-6 py-2 bg-purple-700 hover:bg-purple-800 text-white font-black rounded-lg text-xs shadow"
                   >
-                    {submitting ? "Creating..." : "Create Handover & Start Scope →"}
+                    {submitting ? "Migrating Data..." : "Migrate & Start Handover →"}
                   </button>
                 </div>
               </form>
@@ -404,7 +457,7 @@ export default function HandoversDashboard() {
           </div>
         )}
 
-        {/* MODAL 2: Register Sales Team Member */}
+        {/* MODAL 2: Register Sales Member */}
         {showSalesModal && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-xl max-w-md w-full p-6 border-2 border-gray-400 shadow-2xl">
@@ -449,7 +502,7 @@ export default function HandoversDashboard() {
                 <div>
                   <label className="block text-xs font-black text-gray-800 mb-1">Designation</label>
                   <input
-                    placeholder="e.g. Senior Sales Manager / Wedding Planner"
+                    placeholder="e.g. Senior Sales Manager"
                     value={salesDesignation}
                     onChange={(e) => setSalesDesignation(e.target.value)}
                     className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-xs"

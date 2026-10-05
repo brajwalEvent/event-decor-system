@@ -15,17 +15,18 @@ export default function Navbar() {
   const isSales = role === "sales";
   const isProduction = role === "production";
   const canAccessProduction = isSuperAdmin || isProduction || role === "admin";
+  const canAccessSales = isSuperAdmin || isSales || role === "admin";
 
   return (
     <header className="bg-gray-900 text-white border-b border-gray-800 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-4 sm:gap-6 overflow-x-auto">
           <span className="font-black text-lg sm:text-xl tracking-tight text-white whitespace-nowrap">
-            🎪 DECOR<span className="text-blue-500">OPS</span>
+            🎪 BRAJWAL<span className="text-blue-500">EVENTS</span>
           </span>
 
           <nav className="flex items-center gap-1 sm:gap-2">
-            {/* Super Admin Exclusive */}
+            {/* 1. Super Admin Exclusive */}
             {isSuperAdmin && (
               <Link
                 href="/admin/team"
@@ -39,17 +40,33 @@ export default function Navbar() {
               </Link>
             )}
 
-            {/* Wedding Handovers */}
+            {/* 2. SALES CRM & CLIENT QUOTES (FOR SALES & ADMIN) */}
+            {canAccessSales && (
+              <Link
+                href="/crm"
+                className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                  pathname.startsWith("/crm") 
+                    ? "bg-amber-600 text-white shadow" 
+                    : "text-amber-300 hover:bg-gray-800 hover:text-white"
+                }`}
+              >
+                💼 Sales CRM & Quotes
+              </Link>
+            )}
+
+            {/* 3. Wedding Handovers (Visible to Everyone) */}
             <Link
               href="/handovers"
               className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                pathname.startsWith("/handovers") ? "bg-purple-700 text-white shadow" : "text-purple-300 hover:bg-gray-800"
+                pathname.startsWith("/handovers") 
+                  ? "bg-purple-700 text-white shadow" 
+                  : "text-purple-300 hover:bg-gray-800 hover:text-white"
               }`}
             >
               📋 Wedding Handovers
             </Link>
 
-            {/* Production Master Libraries */}
+            {/* 4. Production Master Libraries (Visible to Production & Admin) */}
             {canAccessProduction && (
               <>
                 <Link
@@ -67,26 +84,25 @@ export default function Navbar() {
                     pathname === "/flowers" ? "bg-pink-700 text-white shadow" : "text-pink-300 hover:bg-gray-800"
                   }`}
                 >
-                  🌸 Natural Flowers
+                  🌸 Flowers
                 </Link>
 
-                {/* NEW: LABOR MASTER LIBRARY */}
                 <Link
                   href="/labors"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
                     pathname === "/labors" ? "bg-amber-600 text-white shadow" : "text-amber-300 hover:bg-gray-800"
                   }`}
                 >
-                  👷 Labor Master
+                  👷 Labor
                 </Link>
 
                 <Link
                   href="/entertainment"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                    pathname === "/entertainment" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                    pathname === "/entertainment" ? "bg-purple-800 text-white" : "text-gray-300 hover:bg-gray-800"
                   }`}
                 >
-                  🎤 Entertainment & SFX
+                  📦 Other Items
                 </Link>
 
                 <Link
@@ -109,7 +125,7 @@ export default function Navbar() {
               isSuperAdmin 
                 ? "bg-red-950 text-red-300 border-red-700" 
                 : isSales 
-                ? "bg-purple-950 text-purple-300 border-purple-800" 
+                ? "bg-amber-950 text-amber-300 border-amber-800" 
                 : "bg-blue-950 text-blue-300 border-blue-800"
             }`}>
               {isSuperAdmin ? "👑 Super Admin" : isSales ? "💼 Front Sales Team" : "🛠️ Production Team"}

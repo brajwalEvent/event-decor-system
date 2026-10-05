@@ -24,7 +24,7 @@ interface Variant {
   notes: string;
 }
 
-export default function EntertainmentPage() {
+export default function OtherItemsPage() {
   const { user, role, loading } = useAuth();
   const router = useRouter();
 
@@ -34,22 +34,25 @@ export default function EntertainmentPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  // Categories
-  const [categories, setCategories] = useState<string[]>([
+  // Default Categories list
+  const defaultCategories = [
+    "Printing & Stationery (Tags, Itineraries)",
     "Sound & Audio",
-    "Anchors & Emcees",
     "Special Effects & SFX",
+    "Anchors & Emcees",
     "Live Artists & Bands",
     "DJs & Musicians",
     "Live Counters & Stalls",
+    "Gifting & Welcome Hampers",
     "Entry Theme Elements"
-  ]);
+  ];
+  const [categories, setCategories] = useState<string[]>(defaultCategories);
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [customCategoryInput, setCustomCategoryInput] = useState("");
 
   // Base Form Fields
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("Sound & Audio");
+  const [category, setCategory] = useState("Printing & Stationery (Tags, Itineraries)");
   const [writtenNotes, setWrittenNotes] = useState("");
 
   // PRICING LOGIC: Toggle between Single Price vs Multiple Variants
@@ -65,10 +68,10 @@ export default function EntertainmentPage() {
   const [varName, setVarName] = useState("");
   const [varPrice, setVarPrice] = useState<number>(0);
   const [varUnit, setVarUnit] = useState("Per Event");
-  const [varCustomUnit, setVarCustomUnit] = useState("");
+  const [varCustomUnit, setVarCustomUnit] = useState(""); // Custom Unit for Variant
   const [varNotes, setVarNotes] = useState("");
 
-  // Attributes / Riders (Common to the service)
+  // Attributes / Riders
   const [travelCostAdditional, setTravelCostAdditional] = useState(false);
   const [foodCostAdditional, setFoodCostAdditional] = useState(false);
   const [roomsRequired, setRoomsRequired] = useState(false);
@@ -95,12 +98,20 @@ export default function EntertainmentPage() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Fetch Items from Firestore
+  // Fetch Items & Permanently Restore All Custom Categories
   const fetchItems = async () => {
     try {
       const q = query(collection(db, "entertainment"), orderBy("createdAt", "desc"));
       const snap = await getDocs(q);
-      setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const fetchedItems = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setItems(fetchedItems);
+
+      // 1. PERMANENT CATEGORY ENGINE: Collect all existing categories from database
+      const allUniqueCats = new Set<string>(defaultCategories);
+      fetchedItems.forEach((it: any) => {
+        if (it.category) allUniqueCats.add(it.category.trim());
+      });
+      setCategories(Array.from(allUniqueCats));
     } catch (err) {
       console.error("Error fetching items:", err);
     }
@@ -170,14 +181,18 @@ export default function EntertainmentPage() {
     setNewAttributeInput("");
   };
 
-  // Add Variant
+  // Add Variant (With Custom Unit Support)
   const handleAddVariant = () => {
     if (!varName.trim()) {
-      alert("Please enter a variant name (e.g. JBL VRX or RCF TT+)");
+      alert("Please enter a variant name (e.g. Standard 300gsm Tag or JBL Line Array)");
       return;
     }
     if (!varPrice || varPrice <= 0) {
       alert("Please enter a valid price for this variant.");
+      return;
+    }
+    if (varUnit === "Custom Unit" && !varCustomUnit.trim()) {
+      alert("Please specify the custom unit for this variant (e.g. Per 100 Tags, Per Box).");
       return;
     }
 
@@ -186,7 +201,7 @@ export default function EntertainmentPage() {
       name: varName.trim(),
       price: Number(varPrice),
       pricingUnit: varUnit,
-      customUnit: varCustomUnit,
+      customUnit: varUnit === "Custom Unit" ? varCustomUnit.trim() : "",
       notes: varNotes.trim(),
     };
 
@@ -194,12 +209,14 @@ export default function EntertainmentPage() {
     setVarName("");
     setVarPrice(0);
     setVarNotes("");
+    setVarUnit("Per Event");
+    setVarCustomUnit("");
   };
 
   // Reset form
   const resetForm = () => {
     setName("");
-    setCategory("Sound & Audio");
+    setCategory(categories[0] || "Printing & Stationery (Tags, Itineraries)");
     setIsCustomCategory(false);
     setCustomCategoryInput("");
     setHasVariants(false);
@@ -209,6 +226,8 @@ export default function EntertainmentPage() {
     setVariants([]);
     setVarName("");
     setVarPrice(0);
+    setVarUnit("Per Event");
+    setVarCustomUnit("");
     setVarNotes("");
     setWrittenNotes("");
     setTravelCostAdditional(false);
@@ -235,15 +254,15 @@ export default function EntertainmentPage() {
     setIsEditing(true);
     setEditId(item.id);
     setName(item.name || "");
-    setCategory(item.category || "Sound & Audio");
+    setCategory(item.category || "Printing & Stationery (Tags, Itineraries)");
     setIsCustomCategory(false);
+    setCustomCategoryInput("");
     
-    // Check if item has variants
     const itemHasVariants = item.hasVariants || (item.variants && item.variants.length > 0);
     setHasVariants(itemHasVariants);
 
     if (itemHasVariants) {
-      setPrice(0); // Blank base price
+      setPrice(0);
       setVariants(item.variants || []);
     } else {
       setPrice(item.price || 0);
@@ -277,20 +296,23 @@ export default function EntertainmentPage() {
     }
   };
 
-  // Save Item
+  // Save Item (Permanently saves custom category)
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
     if (hasVariants && variants.length === 0) {
-      alert("You selected 'Multiple Variants', but haven't added any variant yet. Please add at least one variant (e.g. JBL or RCF) or switch to 'Single Price'.");
+      alert("You selected 'Multiple Variants', but haven't added any variant yet. Please add at least one variant or switch to 'Single Price'.");
       return;
     }
 
     setSubmitting(true);
 
     try {
+      // PERMANENT CATEGORY: Save category and persist in list
       const finalCategory = isCustomCategory ? customCategoryInput.trim() : category;
+      if (isCustomCategory && finalCategory && !categories.includes(finalCategory)) {
+        setCategories((prev) => [...prev, finalCategory]);
+      }
 
       // Upload Images
       let uploadedImageUrls: string[] = [...existingImages];
@@ -317,16 +339,15 @@ export default function EntertainmentPage() {
         finalAudioUrl = await getDownloadURL(audioRef);
       }
 
-      // Base Price is strictly 0 / ignored if hasVariants is true
       const itemData = {
-        name,
+        name: name.trim(),
         category: finalCategory,
         hasVariants,
         price: hasVariants ? 0 : Number(price) || 0,
         pricingUnit: hasVariants ? "" : pricingUnit,
         customUnit: hasVariants ? "" : customUnit,
         variants: hasVariants ? variants : [],
-        writtenNotes,
+        writtenNotes: writtenNotes.trim(),
         attributes: {
           travelCostAdditional,
           foodCostAdditional,
@@ -360,25 +381,25 @@ export default function EntertainmentPage() {
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-xl font-bold">Loading Entertainment Items...</div>;
+  if (loading) return <div className="p-8 text-center text-xl font-bold">Loading Other Items Library...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border-2 border-gray-300 shadow-sm mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border-2 border-gray-300 shadow-sm">
           <div>
-            <h1 className="text-3xl font-black text-gray-900">Entertainment, Sound & SFX Library</h1>
+            <h1 className="text-3xl font-black text-gray-900">Other Items Library</h1>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Manage non-decor items: Audio gear, Anchors, Color bombs, SFX, Live Stalls & Artists.
+              Manage non-decor items: Itinerary & luggage tags printing, Sound, Anchors, SFX, Gifting & Stalls.
             </p>
           </div>
           {role !== "sales" && (
             <button
               onClick={openNewModal}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-black px-6 py-3 rounded-lg shadow transition"
+              className="bg-purple-700 hover:bg-purple-800 text-white font-black px-6 py-3 rounded-lg shadow transition flex items-center gap-1.5"
             >
-              + Add Entertainment Item
+              + Add Other Item
             </button>
           )}
         </div>
@@ -397,7 +418,6 @@ export default function EntertainmentPage() {
                 className="bg-white border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between"
               >
                 <div>
-                  {/* Image */}
                   <div className="h-52 bg-gray-200 relative overflow-hidden">
                     {item.images && item.images.length > 0 ? (
                       <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />
@@ -405,7 +425,6 @@ export default function EntertainmentPage() {
                       <div className="flex items-center justify-center h-full text-gray-500 font-bold">No Photos</div>
                     )}
 
-                    {/* Price Badge: Changes cleanly depending on variants vs single price */}
                     {hasItemVariants ? (
                       <span className="absolute top-2 right-2 bg-purple-700 text-white text-xs font-black px-2.5 py-1 rounded shadow">
                         From ₹{minPrice.toLocaleString()} ({item.variants.length} Options)
@@ -454,18 +473,17 @@ export default function EntertainmentPage() {
                       ))}
                     </div>
 
-                    {/* Written Notes */}
                     {item.writtenNotes && (
                       <p className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
                         <strong>Notes:</strong> {item.writtenNotes}
                       </p>
                     )}
 
-                    {/* Variants List (If Multiple Variants) */}
+                    {/* Variants List */}
                     {hasItemVariants && (
                       <div className="bg-purple-50/70 border-2 border-purple-200 p-2.5 rounded-lg space-y-1.5">
                         <p className="text-xs font-black text-purple-950 uppercase">
-                          Available Brands / Options ({item.variants.length}):
+                          Available Options / Types ({item.variants.length}):
                         </p>
                         <div className="space-y-1">
                           {item.variants.map((v: Variant) => (
@@ -483,7 +501,6 @@ export default function EntertainmentPage() {
                       </div>
                     )}
 
-                    {/* Audio Instruction */}
                     {item.audioUrl && (
                       <div className="bg-purple-50 border border-purple-200 p-2 rounded-lg">
                         <p className="text-xs font-black text-purple-900 mb-1">🎙️ Audio Note:</p>
@@ -491,7 +508,6 @@ export default function EntertainmentPage() {
                       </div>
                     )}
 
-                    {/* Video Walkthrough */}
                     {item.videoUrl && (
                       <div className="bg-blue-50 border border-blue-200 p-2 rounded-lg">
                         <p className="text-xs font-black text-blue-900 mb-1">📹 Video Preview:</p>
@@ -501,7 +517,6 @@ export default function EntertainmentPage() {
                   </div>
                 </div>
 
-                {/* Action Buttons */}
                 {role !== "sales" && (
                   <div className="p-4 border-t border-gray-200 grid grid-cols-2 gap-2 bg-gray-50">
                     <button
@@ -525,20 +540,20 @@ export default function EntertainmentPage() {
 
         {items.length === 0 && (
           <div className="text-center py-16 bg-white border-2 border-dashed border-gray-300 rounded-xl">
-            <p className="text-gray-600 font-bold text-lg">No entertainment or SFX items created yet.</p>
+            <p className="text-gray-600 font-bold text-lg">No items added to Other Items library yet.</p>
             <p className="text-gray-400 text-sm mt-1">
-              Click "+ Add Entertainment Item" to add sound setups, anchors, fireworks, or live stalls.
+              Click "+ Add Other Item" to add luggage tags, itinerary prints, sound setups, or fireworks.
             </p>
           </div>
         )}
 
-        {/* Modal: Add or Edit Item */}
+        {/* MODAL: ADD OR EDIT ITEM */}
         {showModal && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-xl max-w-3xl w-full p-6 max-h-[92vh] overflow-y-auto border-2 border-gray-400 shadow-2xl space-y-6">
               <div className="flex justify-between items-center border-b-2 pb-3">
                 <h2 className="text-2xl font-black text-gray-900">
-                  {isEditing ? "Edit Entertainment / SFX Item" : "Add Entertainment / SFX Item"}
+                  {isEditing ? "Edit Item / Service" : "Add New Item / Service"}
                 </h2>
                 <button
                   onClick={() => setShowModal(false)}
@@ -551,7 +566,7 @@ export default function EntertainmentPage() {
               <form onSubmit={handleSave} className="space-y-6">
                 {/* 1. Item Details */}
                 <div className="space-y-4">
-                  <h3 className="font-black text-blue-700 text-sm tracking-wide uppercase border-b pb-1">
+                  <h3 className="font-black text-purple-900 text-sm tracking-wide uppercase border-b pb-1">
                     1. Item & Service Details
                   </h3>
 
@@ -561,62 +576,64 @@ export default function EntertainmentPage() {
                     </label>
                     <input
                       required
-                      placeholder="e.g. Sound System Setup / Anchor Emcee / Color Smoke Bomb"
+                      placeholder="e.g. Wedding Itinerary Booklet / Luggage Tags / Sound System / Emcee"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900 outline-none focus:border-blue-600"
+                      className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900 outline-none focus:border-purple-600"
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-black text-gray-800 mb-1">Category</label>
-                      <select
-                        value={isCustomCategory ? "custom" : category}
-                        onChange={(e) => {
-                          if (e.target.value === "custom") setIsCustomCategory(true);
-                          else {
-                            setIsCustomCategory(false);
-                            setCategory(e.target.value);
-                          }
-                        }}
-                        className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900"
-                      >
-                        {categories.map((cat) => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                        <option value="custom" className="text-blue-700 font-black">+ Add Custom Category...</option>
-                      </select>
-                    </div>
+                  {/* Category Selection */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-black text-gray-800">Category *</label>
+                    <select
+                      value={isCustomCategory ? "custom" : category}
+                      onChange={(e) => {
+                        if (e.target.value === "custom") {
+                          setIsCustomCategory(true);
+                        } else {
+                          setIsCustomCategory(false);
+                          setCategory(e.target.value);
+                        }
+                      }}
+                      className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900 bg-white"
+                    >
+                      {categories.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                      <option value="custom" className="text-purple-700 font-black">+ Add Custom Category...</option>
+                    </select>
 
+                    {/* PERMANENT CUSTOM CATEGORY INPUT */}
                     {isCustomCategory && (
-                      <div>
-                        <label className="block text-sm font-black text-blue-900 mb-1">New Category *</label>
+                      <div className="bg-purple-50 p-3 rounded-xl border-2 border-purple-300">
+                        <label className="block text-xs font-black text-purple-950 mb-1">
+                          Enter New Category Name (Permanently Saves to List) *
+                        </label>
                         <input
                           required
-                          placeholder="e.g. Vintage Cars, Dhol Tasha"
+                          placeholder="e.g. Hospitality & Logistics, Vintage Car Fleet, Dhol Tasha"
                           value={customCategoryInput}
                           onChange={(e) => setCustomCategoryInput(e.target.value)}
-                          className="w-full border-2 border-blue-400 bg-white p-2.5 rounded-lg font-bold text-gray-900"
+                          className="w-full border-2 border-purple-400 bg-white p-2 rounded-lg font-bold text-xs text-gray-900 outline-none"
                         />
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* 2. Pricing Setup: Either Single Price OR Multiple Variants */}
+                {/* 2. Pricing Setup */}
                 <div className="space-y-4 border-2 border-blue-300 bg-blue-50/30 p-4 rounded-xl">
                   <h3 className="font-black text-blue-900 text-sm tracking-wide uppercase">
                     2. Pricing Structure
                   </h3>
 
-                  {/* Mode Selector */}
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
                       onClick={() => {
                         setHasVariants(false);
-                        setVariants([]); // Clear variants
+                        setVariants([]);
                       }}
                       className={`p-3 rounded-lg border-2 text-left transition ${
                         !hasVariants
@@ -626,7 +643,7 @@ export default function EntertainmentPage() {
                     >
                       <span className="block text-sm">💰 Single / Fixed Price</span>
                       <span className="block text-xs opacity-80 mt-0.5">
-                        One price for all (e.g. Color Bomb, Anchor)
+                        One price for all (e.g. Standard Anchor, Color Bomb)
                       </span>
                     </button>
 
@@ -634,7 +651,7 @@ export default function EntertainmentPage() {
                       type="button"
                       onClick={() => {
                         setHasVariants(true);
-                        setPrice(0); // Blank out single base price
+                        setPrice(0);
                       }}
                       className={`p-3 rounded-lg border-2 text-left transition ${
                         hasVariants
@@ -642,14 +659,14 @@ export default function EntertainmentPage() {
                           : "bg-white text-gray-700 border-gray-300 font-bold hover:bg-gray-100"
                       }`}
                     >
-                      <span className="block text-sm">🔀 Multiple Variants / Brands</span>
+                      <span className="block text-sm">🔀 Multiple Variants / Types / Brands</span>
                       <span className="block text-xs opacity-80 mt-0.5">
-                        Different options & prices (e.g. JBL vs RCF)
+                        Different options & prices (e.g. 300gsm vs 450gsm Tag, JBL vs RCF)
                       </span>
                     </button>
                   </div>
 
-                  {/* Case A: Single Price inputs */}
+                  {/* Case A: Single Price */}
                   {!hasVariants && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-3.5 rounded-lg border-2 border-blue-200">
                       <div>
@@ -684,7 +701,7 @@ export default function EntertainmentPage() {
                           {pricingUnit === "Custom Unit" && (
                             <input
                               required
-                              placeholder="e.g. Per 50 Shots"
+                              placeholder="e.g. Per 50 Tags, Per Box"
                               value={customUnit}
                               onChange={(e) => setCustomUnit(e.target.value)}
                               className="w-full border-2 border-blue-400 bg-white p-2 rounded-lg font-bold text-gray-900"
@@ -695,57 +712,76 @@ export default function EntertainmentPage() {
                     </div>
                   )}
 
-                  {/* Case B: Multiple Variants builder (Base price is completely blanked and hidden!) */}
+                  {/* Case B: Multiple Variants (WITH CUSTOM UNIT SUPPORT!) */}
                   {hasVariants && (
                     <div className="space-y-3 bg-purple-50 p-4 rounded-xl border-2 border-purple-300">
                       <p className="text-xs font-black text-purple-950 uppercase">
-                        Add Available Brands or Options (Each with its own price):
+                        Add Available Types / Brands / Materials:
                       </p>
 
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white p-3 rounded-lg border">
-                        <div className="md:col-span-4">
-                          <label className="block text-xs font-bold text-gray-700">Variant / Brand Name *</label>
-                          <input
-                            placeholder="e.g. JBL VRX System"
-                            value={varName}
-                            onChange={(e) => setVarName(e.target.value)}
-                            className="w-full border p-1.5 rounded font-bold text-xs"
-                          />
+                      <div className="bg-white p-3.5 rounded-xl border space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] font-black text-gray-700">Option / Variant Name *</label>
+                            <input
+                              placeholder="e.g. 400gsm Gold Foil Tag / JBL VRX"
+                              value={varName}
+                              onChange={(e) => setVarName(e.target.value)}
+                              className="w-full border-2 border-gray-300 p-1.5 rounded-lg font-bold text-xs"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-black text-gray-700">Price (₹) *</label>
+                            <input
+                              type="number"
+                              placeholder="e.g. 450"
+                              value={varPrice || ""}
+                              onChange={(e) => setVarPrice(Number(e.target.value))}
+                              className="w-full border-2 border-gray-300 p-1.5 rounded-lg font-bold text-xs"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-black text-gray-700">Unit *</label>
+                            <select
+                              value={varUnit}
+                              onChange={(e) => setVarUnit(e.target.value)}
+                              className="w-full border-2 border-gray-300 p-1.5 rounded-lg font-bold text-xs bg-white"
+                            >
+                              <option value="Per Pc">Per Pc</option>
+                              <option value="Per Event">Per Event</option>
+                              <option value="Per Day">Per Day</option>
+                              <option value="Per Person">Per Person</option>
+                              <option value="Per Wedding">Per Wedding</option>
+                              <option value="Custom Unit">Custom Unit...</option>
+                            </select>
+                          </div>
                         </div>
 
-                        <div className="md:col-span-3">
-                          <label className="block text-xs font-bold text-gray-700">Price (₹) *</label>
-                          <input
-                            type="number"
-                            placeholder="45000"
-                            value={varPrice || ""}
-                            onChange={(e) => setVarPrice(Number(e.target.value))}
-                            className="w-full border p-1.5 rounded font-bold text-xs"
-                          />
-                        </div>
+                        {/* CUSTOM UNIT INPUT FOR VARIANT */}
+                        {varUnit === "Custom Unit" && (
+                          <div className="bg-purple-50/70 p-2.5 rounded-lg border border-purple-200">
+                            <label className="block text-[11px] font-black text-purple-950 mb-1">
+                              Specify Custom Unit for this Variant *
+                            </label>
+                            <input
+                              required
+                              placeholder="e.g. Per 100 Tags, Per Box, Per Roll, Per 50 Shots"
+                              value={varCustomUnit}
+                              onChange={(e) => setVarCustomUnit(e.target.value)}
+                              className="w-full border-2 border-purple-400 p-1.5 rounded-lg font-bold text-xs bg-white text-gray-900"
+                            />
+                          </div>
+                        )}
 
-                        <div className="md:col-span-3">
-                          <label className="block text-xs font-bold text-gray-700">Unit</label>
-                          <select
-                            value={varUnit}
-                            onChange={(e) => setVarUnit(e.target.value)}
-                            className="w-full border p-1.5 rounded font-bold text-xs"
-                          >
-                            <option value="Per Event">Per Event</option>
-                            <option value="Per Day">Per Day</option>
-                            <option value="Per Pc">Per Pc</option>
-                            <option value="Per Person">Per Person</option>
-                            <option value="Per Wedding">Per Wedding</option>
-                          </select>
-                        </div>
-
-                        <div className="md:col-span-2 flex items-end">
+                        <div className="flex justify-end">
                           <button
                             type="button"
                             onClick={handleAddVariant}
-                            className="w-full bg-purple-700 hover:bg-purple-800 text-white font-black p-1.5 rounded text-xs"
+                            className="bg-purple-700 hover:bg-purple-800 text-white font-black px-4 py-2 rounded-lg text-xs shadow"
                           >
-                            + Add Option
+                            + Add Option to List
                           </button>
                         </div>
                       </div>
@@ -754,11 +790,11 @@ export default function EntertainmentPage() {
                       {variants.length > 0 ? (
                         <div className="space-y-1.5 mt-2">
                           {variants.map((v, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded border text-xs">
+                            <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border text-xs shadow-sm">
                               <div>
                                 <span className="font-bold text-purple-950 text-sm">🔀 {v.name}</span>
                                 <span className="ml-3 font-black text-blue-700">
-                                  ₹{v.price.toLocaleString()} / {v.pricingUnit}
+                                  ₹{v.price.toLocaleString()} / {v.pricingUnit === "Custom Unit" ? v.customUnit : v.pricingUnit}
                                 </span>
                               </div>
                               <button
@@ -773,7 +809,7 @@ export default function EntertainmentPage() {
                         </div>
                       ) : (
                         <p className="text-xs text-amber-800 bg-amber-100 p-2 rounded font-bold">
-                          ⚠️ Please add at least one variant option above (e.g. JBL VRX or RCF TT+).
+                          ⚠️ Please add at least one option above.
                         </p>
                       )}
                     </div>
@@ -792,7 +828,7 @@ export default function EntertainmentPage() {
                         type="checkbox"
                         checked={travelCostAdditional}
                         onChange={(e) => setTravelCostAdditional(e.target.checked)}
-                        className="h-4 w-4 accent-blue-600"
+                        className="h-4 w-4 accent-purple-600"
                       />
                       <span className="text-xs font-black text-gray-900">✈️ Travel Cost Extra</span>
                     </label>
@@ -802,7 +838,7 @@ export default function EntertainmentPage() {
                         type="checkbox"
                         checked={foodCostAdditional}
                         onChange={(e) => setFoodCostAdditional(e.target.checked)}
-                        className="h-4 w-4 accent-blue-600"
+                        className="h-4 w-4 accent-purple-600"
                       />
                       <span className="text-xs font-black text-gray-900">🍽️ Food Cost Extra</span>
                     </label>
@@ -813,7 +849,7 @@ export default function EntertainmentPage() {
                         id="roomCheck"
                         checked={roomsRequired}
                         onChange={(e) => setRoomsRequired(e.target.checked)}
-                        className="h-4 w-4 accent-blue-600"
+                        className="h-4 w-4 accent-purple-600"
                       />
                       <label htmlFor="roomCheck" className="text-xs font-black text-gray-900">
                         🏨 Rooms Needed:
@@ -830,14 +866,13 @@ export default function EntertainmentPage() {
                     </div>
                   </div>
 
-                  {/* Custom Attributes */}
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">
-                      Add Custom Attribute / Technical Rider Note
+                      Add Custom Attribute / Technical Requirement
                     </label>
                     <div className="flex gap-2">
                       <input
-                        placeholder="e.g. Needs 32-Channel Audio Mixer, Requires green room, 3-Phase power required"
+                        placeholder="e.g. Client to provide guest list in Excel, Requires 32-channel audio mixer"
                         value={newAttributeInput}
                         onChange={(e) => setNewAttributeInput(e.target.value)}
                         className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium text-xs bg-white"
@@ -880,7 +915,7 @@ export default function EntertainmentPage() {
                   </label>
                   <textarea
                     rows={2}
-                    placeholder="e.g. Sound requires minimum 10kW power generator. Anchors require 2 wireless Shure mics."
+                    placeholder="e.g. Final printing proof must be approved 3 days prior. Sound requires 15kW generator."
                     value={writtenNotes}
                     onChange={(e) => setWrittenNotes(e.target.value)}
                     className="w-full border-2 border-gray-400 p-2.5 rounded-lg text-sm font-medium"
@@ -893,7 +928,6 @@ export default function EntertainmentPage() {
                     4. Media Attachments (Optional)
                   </h3>
 
-                  {/* Photos */}
                   <div>
                     <label className="block text-xs font-black text-gray-700 mb-1">
                       📸 Photos (Select multiple)
@@ -912,7 +946,6 @@ export default function EntertainmentPage() {
                     )}
                   </div>
 
-                  {/* Video (Max 20MB) */}
                   <div>
                     <label className="block text-xs font-black text-gray-700 mb-1">
                       🎥 Short Video Demo (Max 20MB Limit)
@@ -923,14 +956,8 @@ export default function EntertainmentPage() {
                       onChange={handleVideoSelect}
                       className="block w-full text-xs border border-gray-400 rounded p-1.5 bg-white cursor-pointer"
                     />
-                    {videoFile && (
-                      <p className="text-xs text-green-700 font-bold mt-1">
-                        Selected: {videoFile.name} ({(videoFile.size / (1024 * 1024)).toFixed(1)} MB)
-                      </p>
-                    )}
                   </div>
 
-                  {/* Voice Note */}
                   <div>
                     <label className="block text-xs font-black text-gray-700 mb-1">
                       🎙️ Voice Note Instructions
@@ -976,7 +1003,7 @@ export default function EntertainmentPage() {
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="px-6 py-2.5 bg-blue-600 text-white font-black rounded-lg hover:bg-blue-700 shadow disabled:opacity-50"
+                    className="px-6 py-2.5 bg-purple-700 text-white font-black rounded-lg hover:bg-purple-800 shadow disabled:opacity-50"
                   >
                     {submitting ? "Saving..." : isEditing ? "Update Item" : "Save Item"}
                   </button>
