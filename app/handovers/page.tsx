@@ -200,11 +200,11 @@ export default function HandoversDashboard() {
 
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={() => setShowSalesModal(true)}
-              className="bg-white border-2 border-gray-400 hover:bg-gray-100 text-gray-900 font-bold px-4 py-2.5 rounded-lg text-sm transition"
-            >
-              👤 Add Sales Team Member
-            </button>
+  onClick={() => setShowSalesModal(true)}
+  className="hidden bg-white border-2 border-gray-400 hover:bg-gray-100 text-gray-900 font-bold px-4 py-2.5 rounded-lg text-sm transition"
+>
+  👤 Add Sales Team Member
+</button>
             <button
               onClick={() => {
                 setSelectedLeadId("");

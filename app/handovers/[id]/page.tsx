@@ -657,7 +657,99 @@ export default function HandoverWorkspace() {
     setEntIsDayApplicable(false);
     setEntNotes("");
   };
+   
+  // EDIT OR ADD EXECUTION NOTE FOR EVENT OTHER ITEMS
+  const handleUpdateEventItemNote = async (itemIdx: number) => {
+    const currentItem = currentEvent.entertainmentElements[itemIdx];
+    const newNote = prompt("Enter / Edit Execution Instructions:", currentItem.notes || "");
+    if (newNote === null) return;
 
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements[itemIdx].notes = newNote.trim();
+    await updateHandoverDaysInDb(updatedDays, `Updated execution note for ${currentItem.name}`);
+  };
+
+  // EDIT OR ADD LOGISTICS NOTE FOR WEDDING-WIDE ESSENTIALS
+  const handleUpdateGeneralItemNote = async (itemId: string) => {
+    const currentList = handover.generalWeddingElements || [];
+    const itemIndex = currentList.findIndex((i: any) => i.id === itemId);
+    if (itemIndex === -1) return;
+
+    const currentItem = currentList[itemIndex];
+    const newNote = prompt("Enter / Edit Logistics & Delivery Instructions:", currentItem.notes || "");
+    if (newNote === null) return;
+
+    const updatedList = [...currentList];
+    updatedList[itemIndex].notes = newNote.trim();
+    await updateGeneralElementsInDb(updatedList, `Updated logistics note for ${currentItem.name}`);
+  }; 
+ // EDIT QUANTITY FOR EVENT ITEM
+  const handleUpdateEventItemQty = async (itemIdx: number) => {
+    const currentItem = currentEvent.entertainmentElements[itemIdx];
+    const newQty = prompt(`Edit Quantity for "${currentItem.name}":`, currentItem.quantity || 1);
+    if (newQty === null || isNaN(Number(newQty)) || Number(newQty) <= 0) return;
+
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements[itemIdx].quantity = Number(newQty);
+    await updateHandoverDaysInDb(updatedDays, `Updated quantity for ${currentItem.name} to ${newQty}`);
+  };
+
+  // EDIT OR APPLY DURATION (DAYS) FOR EVENT ITEM
+  const handleUpdateEventItemDuration = async (itemIdx: number) => {
+    const currentItem = currentEvent.entertainmentElements[itemIdx];
+    const currentVal = currentItem.isDayApplicable ? currentItem.days : "";
+    const input = prompt(`Enter duration in Days for "${currentItem.name}" (e.g. 2, 3) or enter 0 to remove duration:`, currentVal || "1");
+    if (input === null) return;
+
+    const daysNum = Number(input);
+    const updatedDays = [...handover.days];
+    if (daysNum > 0) {
+      updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements[itemIdx].isDayApplicable = true;
+      updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements[itemIdx].days = daysNum;
+    } else {
+      updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements[itemIdx].isDayApplicable = false;
+      updatedDays[selectedDayIndex].events[selectedEventIndex].entertainmentElements[itemIdx].days = null;
+    }
+    await updateHandoverDaysInDb(updatedDays, `Updated duration for ${currentItem.name}`);
+  };
+
+  // EDIT QUANTITY FOR WEDDING-WIDE ESSENTIAL
+  const handleUpdateGeneralItemQty = async (itemId: string) => {
+    const currentList = handover.generalWeddingElements || [];
+    const idx = currentList.findIndex((i: any) => i.id === itemId);
+    if (idx === -1) return;
+
+    const currentItem = currentList[idx];
+    const newQty = prompt(`Edit Quantity for "${currentItem.name}":`, currentItem.quantity || 1);
+    if (newQty === null || isNaN(Number(newQty)) || Number(newQty) <= 0) return;
+
+    const updatedList = [...currentList];
+    updatedList[idx].quantity = Number(newQty);
+    await updateGeneralElementsInDb(updatedList, `Updated quantity for ${currentItem.name} to ${newQty}`);
+  };
+
+  // EDIT OR APPLY DURATION (DAYS) FOR WEDDING-WIDE ESSENTIAL
+  const handleUpdateGeneralItemDuration = async (itemId: string) => {
+    const currentList = handover.generalWeddingElements || [];
+    const idx = currentList.findIndex((i: any) => i.id === itemId);
+    if (idx === -1) return;
+
+    const currentItem = currentList[idx];
+    const currentVal = currentItem.isDayApplicable ? currentItem.days : "";
+    const input = prompt(`Enter duration in Days for "${currentItem.name}" (e.g. 2, 3) or enter 0 to remove duration:`, currentVal || "1");
+    if (input === null) return;
+
+    const daysNum = Number(input);
+    const updatedList = [...currentList];
+    if (daysNum > 0) {
+      updatedList[idx].isDayApplicable = true;
+      updatedList[idx].days = daysNum;
+    } else {
+      updatedList[idx].isDayApplicable = false;
+      updatedList[idx].days = null;
+    }
+    await updateGeneralElementsInDb(updatedList, `Updated duration for ${currentItem.name}`);
+  };
   const handleDeleteEntertainment = async (entIdx: number) => {
     const entName = handover.days[selectedDayIndex].events[selectedEventIndex].entertainmentElements[entIdx].name;
     if (!window.confirm(`Remove "${entName}"?`)) return;
@@ -1232,16 +1324,30 @@ export default function HandoverWorkspace() {
                               <span className="text-[10px] font-black uppercase bg-purple-100 text-purple-900 px-2 py-0.5 rounded border border-purple-200">
                                 {item.category}
                               </span>
-                              <span className="text-xs font-black text-blue-900 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
-                                Qty: {qty} {(!item.pricingUnit || item.pricingUnit.toLowerCase().includes("pc")) ? item.name : item.pricingUnit}
-                              </span>
-                              {item.isDayApplicable ? (
-                                <span className="text-xs font-black text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-                                  🗓️ Duration: {item.days} Day(s)
-                                </span>
-                              ) : (
-                                <span className="text-xs font-bold text-gray-400">—</span>
-                              )}
+
+                              {/* Clickable Quantity Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateGeneralItemQty(item.id)}
+                                title="Click to edit quantity"
+                                className="text-xs font-black text-blue-900 bg-blue-50 hover:bg-blue-100 px-2.5 py-0.5 rounded border border-blue-200 cursor-pointer flex items-center gap-1 transition"
+                              >
+                                Qty: {qty} {(!item.pricingUnit || item.pricingUnit.toLowerCase().includes("pc")) ? item.name : item.pricingUnit} ✏️
+                              </button>
+
+                              {/* Clickable Duration Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateGeneralItemDuration(item.id)}
+                                title="Click to edit or apply duration in days"
+                                className={`text-xs font-black px-2.5 py-0.5 rounded border cursor-pointer flex items-center gap-1 transition ${
+                                  item.isDayApplicable
+                                    ? "text-purple-900 bg-purple-50 hover:bg-purple-100 border-purple-200"
+                                    : "text-gray-500 bg-gray-100 hover:bg-gray-200 border-gray-300"
+                                }`}
+                              >
+                                {item.isDayApplicable ? `🗓️ ${item.days} Day(s) ✏️` : "+ Add Days (—)"}
+                              </button>
                             </div>
 
                             <h5 className="font-black text-base text-gray-900 mt-1">
@@ -1272,11 +1378,22 @@ export default function HandoverWorkspace() {
                               ))}
                             </div>
 
-                            {item.notes && (
-                              <p className="text-xs text-gray-600 mt-0.5 bg-gray-50 p-1.5 rounded border">
-                                <strong>Logistics Notes:</strong> {item.notes}
-                              </p>
-                            )}
+                            <div className="mt-1 flex items-center gap-2">
+  {item.notes ? (
+    <p className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border flex-1">
+      <strong>Logistics:</strong> {item.notes}
+    </p>
+  ) : (
+    <span className="text-[11px] text-gray-400 italic">No delivery notes added yet.</span>
+  )}
+  <button
+    type="button"
+    onClick={() => handleUpdateGeneralItemNote(item.id)}
+    className="text-[11px] font-bold text-blue-700 hover:underline whitespace-nowrap bg-blue-50 px-2 py-1 rounded border border-blue-200"
+  >
+    {item.notes ? "✏️ Edit" : "+ Add Instructions"}
+  </button>
+</div>
                           </div>
 
                           <button
@@ -1820,16 +1937,30 @@ export default function HandoverWorkspace() {
                                       <span className="font-bold text-purple-950 text-sm">
                                         📦 {item.name} {item.variantName && `(${item.variantName})`}
                                       </span>
-                                      <span className="bg-purple-100 text-purple-900 font-black px-2 py-0.5 rounded text-[11px] border border-purple-200">
-                                        Qty: {qty} {(!item.pricingUnit || item.pricingUnit.toLowerCase().includes("pc")) ? item.name : item.pricingUnit}
-                                      </span>
-                                      {item.isDayApplicable ? (
-                                        <span className="text-xs font-black text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-                                          🗓️ Duration: {item.days} Day(s)
-                                        </span>
-                                      ) : (
-                                        <span className="text-xs font-bold text-gray-400">—</span>
-                                      )}
+
+                                      {/* Clickable Quantity Button */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateEventItemQty(idx)}
+                                        title="Click to edit quantity"
+                                        className="bg-purple-100 hover:bg-purple-200 text-purple-900 font-black px-2 py-0.5 rounded text-[11px] border border-purple-300 cursor-pointer flex items-center gap-1 transition"
+                                      >
+                                        Qty: {qty} {(!item.pricingUnit || item.pricingUnit.toLowerCase().includes("pc")) ? item.name : item.pricingUnit} ✏️
+                                      </button>
+
+                                      {/* Clickable Duration Button */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateEventItemDuration(idx)}
+                                        title="Click to edit or apply duration in days"
+                                        className={`text-[11px] font-black px-2 py-0.5 rounded border cursor-pointer flex items-center gap-1 transition ${
+                                          item.isDayApplicable
+                                            ? "text-purple-900 bg-purple-50 hover:bg-purple-100 border-purple-200"
+                                            : "text-gray-500 bg-gray-100 hover:bg-gray-200 border-gray-300"
+                                        }`}
+                                      >
+                                        {item.isDayApplicable ? `🗓️ ${item.days} Day(s) ✏️` : "+ Add Days (—)"}
+                                      </button>
                                     </div>
 
                                     {/* RIDER TERMS BADGES (NO ROOM COUNT) */}
@@ -1856,7 +1987,22 @@ export default function HandoverWorkspace() {
                                       ))}
                                     </div>
 
-                                    {item.notes && <p className="text-gray-600 mt-1 text-xs"><strong>Execution Note:</strong> {item.notes}</p>}
+                                    <div className="mt-1 flex items-center gap-2">
+  {item.notes ? (
+    <p className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border flex-1">
+      <strong>Execution:</strong> {item.notes}
+    </p>
+  ) : (
+    <span className="text-[11px] text-gray-400 italic">No execution instructions added yet.</span>
+  )}
+  <button
+    type="button"
+    onClick={() => handleUpdateEventItemNote(idx)}
+    className="text-[11px] font-bold text-purple-700 hover:underline whitespace-nowrap bg-purple-50 px-2 py-1 rounded border border-purple-200"
+  >
+    {item.notes ? "✏️ Edit" : "+ Add Instructions"}
+  </button>
+</div>
                                   </div>
 
                                   <button onClick={() => handleDeleteEntertainment(idx)} className="text-red-600 font-bold hover:underline text-xs">
