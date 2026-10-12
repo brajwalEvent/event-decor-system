@@ -123,9 +123,10 @@ export default function StaffAccountingPage(): React.ReactElement {
   }, [selectedStaff]);
 
   // Open New Account
+  // Open New Account
   const handleCreateStaffAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUserUid || !monthlySalaryInput) return;
+    if (!user || !selectedUserUid || !monthlySalaryInput) return;
 
     const matchedUser = availableUsers.find((u) => u.uid === selectedUserUid);
     if (!matchedUser) return;
@@ -168,9 +169,10 @@ export default function StaffAccountingPage(): React.ReactElement {
   };
 
   // Submit Payment/Ledger Transaction (no undefined fields)
+  // Submit Payment/Ledger Transaction (no undefined fields)
   const handleRecordTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStaff || !txnAmount) return;
+    if (!user || !selectedStaff || !txnAmount) return;
 
     const parsedAmount = Number(txnAmount);
 
@@ -200,8 +202,8 @@ export default function StaffAccountingPage(): React.ReactElement {
         date: txnDate,
         paymentDetails,
         createdAt: new Date().toISOString(),
-        createdByUid: user.uid,
-        createdByEmail: user.email || "Unknown",
+        createdByUid: user?.uid || "",
+        createdByEmail: user?.email || "Unknown",
       };
 
       if (remarks.trim()) {

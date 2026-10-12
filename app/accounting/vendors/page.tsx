@@ -30,7 +30,7 @@ export default function VendorAccountingPage(): React.ReactElement {
   const { user, role, isSuperAdmin, loading } = useAuth();
   const router = useRouter();
 
-  const isAccountant = role === "accountant";
+  const isAccountant = (role as any) === "accountant";
   const canAccess = isSuperAdmin || isAccountant || role === "admin";
 
   // Data states
@@ -224,7 +224,7 @@ setCrmWeddings(bookedWeddings);
   // Submit: Onboard New Vendor (No OTP Required)
   const handleCreateVendor = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newVendorName.trim() || !newVendorMobile.trim()) return;
+    if (!user || !newVendorName.trim() || !newVendorMobile.trim()) return;
 
     try {
       setIsUploading(true);
@@ -319,7 +319,7 @@ setCrmWeddings(bookedWeddings);
   // Submit: Add/Update Bank Details (No OTP Required, Strongly Logged)
   const handleUpdateBankDetails = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVendor) return;
+    if (!user || !selectedVendor) return;
 
     try {
       setIsUploading(true);
@@ -397,7 +397,7 @@ setCrmWeddings(bookedWeddings);
   // Submit: Log Purchase
   const handleRecordPurchase = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVendor || !purchAmount || !purchStaffUid) return;
+    if (!user || !selectedVendor || !purchAmount || !purchStaffUid) return;
 
     const parsedAmount = Number(purchAmount);
     const chosenStaff = staffList.find((s) => s.uid === purchStaffUid);
@@ -480,7 +480,7 @@ function cleanFirestoreData(data: Record<string, any>) {
   // Submit: Log Payment
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVendor || !payAmount) return;
+    if (!user || !selectedVendor || !payAmount) return;
 
     const parsedAmount = Number(payAmount);
 
@@ -513,7 +513,7 @@ function cleanFirestoreData(data: Record<string, any>) {
         paymentDetails,
         remarks: payRemarks.trim(),
         createdAt: new Date().toISOString(),
-        createdByUid: user.uid,
+        createdByUid: user?.uid || "",
         createdByEmail: user.email || "Unknown",
       };
 
