@@ -14,8 +14,10 @@ export default function Navbar() {
 
   const isSales = role === "sales";
   const isProduction = role === "production";
+  const isAccountant = role === "accountant" as any;
   const canAccessProduction = isSuperAdmin || isProduction || role === "admin";
   const canAccessSales = isSuperAdmin || isSales || role === "admin";
+  const canAccessAccounting = isSuperAdmin || isAccountant || role === "admin";
 
   return (
     <header className="bg-gray-900 text-white border-b border-gray-800 sticky top-0 z-40">
@@ -36,11 +38,25 @@ export default function Navbar() {
                     : "bg-red-950 text-red-200 hover:bg-red-900"
                 }`}
               >
-                👑 Team Management
+                👑 Team
               </Link>
             )}
 
-            {/* 2. SALES CRM & CLIENT QUOTES (FOR SALES & ADMIN) */}
+            {/* 2. ACCOUNTING ERP (SUPER ADMIN & ACCOUNTANT) */}
+            {canAccessAccounting && (
+              <Link
+                href="/accounting"
+                className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-black whitespace-nowrap transition ${
+                  pathname.startsWith("/accounting")
+                    ? "bg-emerald-600 text-white shadow"
+                    : "text-emerald-300 hover:bg-gray-800 hover:text-white"
+                }`}
+              >
+                📊 Accounting ERP
+              </Link>
+            )}
+            
+            {/* 3. Sales CRM & Quotes */}
             {canAccessSales && (
               <Link
                 href="/crm"
@@ -50,11 +66,11 @@ export default function Navbar() {
                     : "text-amber-300 hover:bg-gray-800 hover:text-white"
                 }`}
               >
-                💼 Sales CRM & Quotes
+                💼 CRM & Quotes
               </Link>
             )}
 
-            {/* 3. Wedding Handovers (Visible to Everyone) */}
+            {/* 4. Wedding Handovers */}
             <Link
               href="/handovers"
               className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
@@ -63,10 +79,10 @@ export default function Navbar() {
                   : "text-purple-300 hover:bg-gray-800 hover:text-white"
               }`}
             >
-              📋 Wedding Handovers
+              📋 Handovers
             </Link>
 
-            {/* 4. Production Master Libraries (Visible to Production & Admin) */}
+            {/* 5. Production Master Libraries */}
             {canAccessProduction && (
               <>
                 <Link
@@ -111,7 +127,7 @@ export default function Navbar() {
                     pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
                   }`}
                 >
-                  📦 Warehouse Props
+                  📦 Props
                 </Link>
               </>
             )}
@@ -124,11 +140,13 @@ export default function Navbar() {
             <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded border ${
               isSuperAdmin 
                 ? "bg-red-950 text-red-300 border-red-700" 
+                : isAccountant
+                ? "bg-emerald-950 text-emerald-300 border-emerald-700"
                 : isSales 
                 ? "bg-amber-950 text-amber-300 border-amber-800" 
                 : "bg-blue-950 text-blue-300 border-blue-800"
             }`}>
-              {isSuperAdmin ? "👑 Super Admin" : isSales ? "💼 Front Sales Team" : "🛠️ Production Team"}
+              {isSuperAdmin ? "👑 Super Admin" : isAccountant ? "📊 Accountant" : isSales ? "💼 Sales" : "🛠️ Production"}
             </span>
           </div>
           <button

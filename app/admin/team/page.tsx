@@ -42,7 +42,7 @@ export default function SuperAdminTeamPage() {
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [assignedRole, setAssignedRole] = useState<"sales" | "production">("sales");
+  const [assignedRole, setAssignedRole] = useState<"sales" | "production" | "accountant">("sales");
 
   useEffect(() => {
     if (!loading && (!user || (!isSuperAdmin && role !== "admin"))) {
@@ -79,14 +79,13 @@ export default function SuperAdminTeamPage() {
       const newUid = userCredential.user.uid;
       await signOut(secondaryAuth);
 
-      // Save user with isFirstLogin: true
       await setDoc(doc(db, "users", newUid), {
         uid: newUid,
         displayName: name.trim(),
         mobile: mobile.trim(),
         email: cleanEmail,
         role: assignedRole,
-        isFirstLogin: true, // Requires password change on first sign-in
+        isFirstLogin: true,
         createdAt: new Date().toISOString(),
       });
 
@@ -108,7 +107,7 @@ export default function SuperAdminTeamPage() {
       setPassword("");
       setAssignedRole("sales");
       fetchTeam();
-      alert(`✅ Account created! When ${name} logs in for the first time, they will be prompted to create their own permanent password.`);
+      alert(`✅ Account created for ${name}!`);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Failed to create team member.");
@@ -147,7 +146,7 @@ export default function SuperAdminTeamPage() {
               <h1 className="text-3xl font-black text-gray-900">Team & Staff Management</h1>
             </div>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Create and manage credentials for Sales and Production. New accounts are prompted to change their password on first sign-in.
+              Create credentials for Sales, Production, and Accounting departments.
             </p>
           </div>
 
@@ -199,6 +198,10 @@ export default function SuperAdminTeamPage() {
                         ) : member.role === "production" ? (
                           <span className="bg-blue-100 text-blue-900 border border-blue-300 px-2.5 py-1 rounded-full text-xs font-black">
                             🛠️ Production Team
+                          </span>
+                        ) : member.role === "accountant" ? (
+                          <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 px-2.5 py-1 rounded-full text-xs font-black">
+                            📊 Accountant
                           </span>
                         ) : (
                           <span className="bg-red-100 text-red-900 border border-red-300 px-2.5 py-1 rounded-full text-xs font-black">
@@ -283,22 +286,31 @@ export default function SuperAdminTeamPage() {
                   />
                 </div>
 
+                {/* 3 Department Options: Sales, Production, Accountant */}
                 <div className="bg-gray-50 p-3 rounded-lg border-2 border-gray-300 space-y-2">
-                  <label className="block text-xs font-black text-gray-900 uppercase">Assign Role *</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className={`flex items-start gap-2 p-2.5 rounded-lg border-2 cursor-pointer ${assignedRole === "sales" ? "bg-purple-50 border-purple-600 font-black" : "bg-white border-gray-300"}`}>
+                  <label className="block text-xs font-black text-gray-900 uppercase">Assign Department & Role *</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className={`flex items-start gap-1.5 p-2 rounded-lg border-2 cursor-pointer ${assignedRole === "sales" ? "bg-purple-50 border-purple-600 font-black" : "bg-white border-gray-300"}`}>
                       <input type="radio" name="teamRole" checked={assignedRole === "sales"} onChange={() => setAssignedRole("sales")} className="mt-1" />
                       <div>
-                        <span className="block text-xs font-black text-purple-950">💼 Sales Team</span>
-                        <span className="block text-[11px] text-gray-500 font-medium">Handovers only</span>
+                        <span className="block text-xs font-black text-purple-950">💼 Sales</span>
+                        <span className="block text-[10px] text-gray-500">CRM & Quotes</span>
                       </div>
                     </label>
 
-                    <label className={`flex items-start gap-2 p-2.5 rounded-lg border-2 cursor-pointer ${assignedRole === "production" ? "bg-blue-50 border-blue-600 font-black" : "bg-white border-gray-300"}`}>
+                    <label className={`flex items-start gap-1.5 p-2 rounded-lg border-2 cursor-pointer ${assignedRole === "production" ? "bg-blue-50 border-blue-600 font-black" : "bg-white border-gray-300"}`}>
                       <input type="radio" name="teamRole" checked={assignedRole === "production"} onChange={() => setAssignedRole("production")} className="mt-1" />
                       <div>
-                        <span className="block text-xs font-black text-blue-950">🛠️ Production Team</span>
-                        <span className="block text-[11px] text-gray-500 font-medium">Inventory & Execution</span>
+                        <span className="block text-xs font-black text-blue-950">🛠️ Production</span>
+                        <span className="block text-[10px] text-gray-500">Inventory & Setup</span>
+                      </div>
+                    </label>
+
+                    <label className={`flex items-start gap-1.5 p-2 rounded-lg border-2 cursor-pointer ${assignedRole === "accountant" ? "bg-emerald-50 border-emerald-600 font-black" : "bg-white border-gray-300"}`}>
+                      <input type="radio" name="teamRole" checked={assignedRole === "accountant"} onChange={() => setAssignedRole("accountant")} className="mt-1" />
+                      <div>
+                        <span className="block text-xs font-black text-emerald-950">📊 Accountant</span>
+                        <span className="block text-[10px] text-gray-500">ERP & Ledgers</span>
                       </div>
                     </label>
                   </div>

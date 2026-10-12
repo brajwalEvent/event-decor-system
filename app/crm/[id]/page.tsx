@@ -124,6 +124,27 @@ export default function LeadQuotationWorkspace() {
   const [isCustomEventModal, setIsCustomEventModal] = useState(false);
   const [customEventInput, setCustomEventInput] = useState("");
 
+  // --- FUZZY SEARCH HELPER (Matches even with minor typos) ---
+  const getFuzzyScore = (query: string, text: string): number => {
+    const q = query.toLowerCase().trim();
+    const t = text.toLowerCase().trim();
+    if (!q) return 1;
+    if (t.includes(q)) return 100 - t.indexOf(q); // Direct match is highest priority
+
+    // Levenshtein distance check for typos
+    let score = 0;
+    let tIdx = 0;
+    for (let i = 0; i < q.length; i++) {
+      const foundIdx = t.indexOf(q[i], tIdx);
+      if (foundIdx !== -1) {
+        score += 1;
+        tIdx = foundIdx + 1;
+      }
+    }
+    // Accept if at least 70% of characters match sequentially
+    return score / q.length >= 0.7 ? score : 0;
+  };
+
   // Item Add Form State for Wedding-Wide Items
   const [wwItemId, setWwItemId] = useState("");
   const [wwVariantId, setWwVariantId] = useState("");
@@ -131,6 +152,7 @@ export default function LeadQuotationWorkspace() {
   const [wwIsDayApplicable, setWwIsDayApplicable] = useState<boolean>(false);
   const [wwDays, setWwDays] = useState<number>(1);
   const [wwDiscount, setWwDiscount] = useState<number>(0);
+  const [wwDiscountType, setWwDiscountType] = useState<"flat" | "percent">("flat");
   const [wwNotes, setWwNotes] = useState("");
 
   // Item Add Form State for Events
@@ -141,8 +163,14 @@ export default function LeadQuotationWorkspace() {
   const [evIsDayApplicable, setEvIsDayApplicable] = useState<boolean>(false);
   const [evDays, setEvDays] = useState<number>(1);
   const [evDiscount, setEvDiscount] = useState<number>(0);
+  const [evDiscountType, setEvDiscountType] = useState<"flat" | "percent">("flat"); // <--- MAKE SURE THIS LINE EXISTS
   const [evNotes, setEvNotes] = useState("");
+  // Search inputs & dropdown open toggles
+  const [wwSearchQuery, setWwSearchQuery] = useState("");
+  const [wwDropdownOpen, setWwDropdownOpen] = useState(false);
 
+  const [evSearchQuery, setEvSearchQuery] = useState("");
+  const [evDropdownOpen, setEvDropdownOpen] = useState(false);
   // Payment Milestones & Terms
   const [paymentMilestones, setPaymentMilestones] = useState<PaymentMilestone[]>([]);
   const [customQuoteNotes, setCustomQuoteNotes] = useState("");
@@ -401,15 +429,31 @@ export default function LeadQuotationWorkspace() {
     const master = otherItemsLibrary.find((i) => i.id === wwItemId);
     if (!master) return alert("Select an item.");
 
-    const newItem = createQuoteItemObject(master, wwVariantId, wwQty, wwIsDayApplicable, wwDays, wwDiscount, wwNotes);
+    // Calculate effective unit price
+    let unitPrice = master.price || 0;
+    if (wwVariantId) {
+      const v = master.variants?.find((x: any) => x.id === wwVariantId);
+      if (v) unitPrice = v.price;
+    }
+    const daysMultiplier = wwIsDayApplicable ? Math.max(1, wwDays) : 1;
+    const baseTotal = unitPrice * Math.max(1, wwQty) * daysMultiplier;
+    
+    // Convert % to flat rupees if percent mode is active
+    const calculatedDiscount = wwDiscountType === "percent" 
+      ? Math.round((baseTotal * (Number(wwDiscount) || 0)) / 100) 
+      : Number(wwDiscount) || 0;
+
+    const newItem = createQuoteItemObject(master, wwVariantId, wwQty, wwIsDayApplicable, wwDays, calculatedDiscount, wwNotes);
     setWeddingWideItems([...weddingWideItems, newItem]);
 
     setWwItemId("");
+    setWwSearchQuery("");
     setWwVariantId("");
     setWwQty(1);
     setWwDays(1);
     setWwIsDayApplicable(false);
     setWwDiscount(0);
+    setWwDiscountType("flat"); // <-- Reset
     setWwNotes("");
   };
 
@@ -417,18 +461,32 @@ export default function LeadQuotationWorkspace() {
     const master = otherItemsLibrary.find((i) => i.id === evItemId);
     if (!master) return alert("Select an item.");
 
-    const newItem = createQuoteItemObject(master, evVariantId, evQty, evIsDayApplicable, evDays, evDiscount, evNotes);
+    let unitPrice = master.price || 0;
+    if (evVariantId) {
+      const v = master.variants?.find((x: any) => x.id === evVariantId);
+      if (v) unitPrice = v.price;
+    }
+    const daysMultiplier = evIsDayApplicable ? Math.max(1, evDays) : 1;
+    const baseTotal = unitPrice * Math.max(1, evQty) * daysMultiplier;
+
+    const calculatedDiscount = evDiscountType === "percent" 
+      ? Math.round((baseTotal * (Number(evDiscount) || 0)) / 100) 
+      : Number(evDiscount) || 0;
+
+    const newItem = createQuoteItemObject(master, evVariantId, evQty, evIsDayApplicable, evDays, calculatedDiscount, evNotes);
     const updated = [...quoteEvents];
     updated[eventIdx].items.push(newItem);
     setQuoteEvents(updated);
 
     setActiveEventIndexForAdd(null);
     setEvItemId("");
+    setEvSearchQuery("");
     setEvVariantId("");
     setEvQty(1);
     setEvDays(1);
     setEvIsDayApplicable(false);
     setEvDiscount(0);
+    setEvDiscountType("flat"); // <-- Reset
     setEvNotes("");
   };
 
@@ -1024,28 +1082,64 @@ export default function LeadQuotationWorkspace() {
             {/* Add Item Form */}
             <div className="bg-white p-3.5 rounded-xl border space-y-3 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <div className="sm:col-span-4">
-                  <label className="block text-[11px] font-black text-gray-700 mb-0.5">Select Item *</label>
-                  <select
-                    value={wwItemId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setWwItemId(id);
-                      setWwVariantId("");
-                      const it = otherItemsLibrary.find((x) => x.id === id);
-                      if (it && checkIsDayUnit(it.pricingUnit)) setWwIsDayApplicable(true);
-                      else setWwIsDayApplicable(false);
-                    }}
-                    className="w-full border p-1.5 rounded-lg font-bold text-xs bg-white text-gray-900"
-                  >
-                    <option value="">-- Choose Item from Library --</option>
-                    {otherItemsLibrary.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        [{item.category}] {item.name} {item.price ? `(₹${item.price} / ${item.pricingUnit === "Custom Unit" ? item.customUnit : item.pricingUnit})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <div className="sm:col-span-4 relative">
+  <label className="block text-[11px] font-black text-gray-700 mb-0.5">Search & Select Item *</label>
+  <input
+    type="text"
+    placeholder="Type to search (e.g. Sound, DJ, Dhol)..."
+    value={wwSearchQuery}
+    onFocus={() => setWwDropdownOpen(true)}
+    onChange={(e) => {
+      setWwSearchQuery(e.target.value);
+      setWwDropdownOpen(true);
+      if (!e.target.value) setWwItemId("");
+    }}
+    className="w-full border-2 border-purple-400 p-1.5 rounded-lg font-bold text-xs bg-white text-gray-900 outline-none"
+  />
+
+  {wwDropdownOpen && (
+    <>
+      {/* Click outside backdrop */}
+      <div className="fixed inset-0 z-10" onClick={() => setWwDropdownOpen(false)} />
+      
+      {/* Filtered Dropdown list */}
+      <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-purple-500 rounded-lg shadow-xl max-h-56 overflow-y-auto z-20">
+        {otherItemsLibrary
+          .map((item) => {
+            const label = `[${item.category}] ${item.name}`;
+            return { item, label, score: getFuzzyScore(wwSearchQuery, label) };
+          })
+          .filter((res) => !wwSearchQuery || res.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(({ item, label }) => (
+            <div
+              key={item.id}
+              onClick={() => {
+                setWwItemId(item.id);
+                setWwSearchQuery(label);
+                setWwVariantId("");
+                if (checkIsDayUnit(item.pricingUnit)) setWwIsDayApplicable(true);
+                else setWwIsDayApplicable(false);
+                setWwDropdownOpen(false);
+              }}
+              className="p-2 text-xs hover:bg-purple-100 cursor-pointer border-b last:border-0 font-medium text-gray-800 flex justify-between"
+            >
+              <span>{label}</span>
+              <span className="font-mono text-purple-900 font-bold">
+                {item.price ? `₹${item.price}` : ""}
+              </span>
+            </div>
+          ))}
+
+        {otherItemsLibrary.filter((i) => getFuzzyScore(wwSearchQuery, `[${i.category}] ${i.name}`) > 0).length === 0 && (
+          <div className="p-3 text-xs text-gray-400 text-center font-bold italic">
+            No item matched your search.
+          </div>
+        )}
+      </div>
+    </>
+  )}
+</div>
 
                 <div className="sm:col-span-3">
                   <label className="block text-[11px] font-black text-gray-700 mb-0.5">Option / Variant</label>
@@ -1095,17 +1189,74 @@ export default function LeadQuotationWorkspace() {
                   )}
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-black text-gray-700 mb-0.5">Discount (₹)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="Discount"
-                    value={wwDiscount || ""}
-                    onChange={(e) => setWwDiscount(Number(e.target.value))}
-                    className="w-full border p-1.5 rounded-lg font-bold text-xs text-right bg-white"
-                  />
-                </div>
+                {/* DISCOUNT TYPE & VALUE */}
+  <div className="sm:col-span-3">
+    <div className="flex justify-between items-center mb-0.5">
+      <label className="text-[11px] font-black text-gray-700">Discount</label>
+      <div className="inline-flex rounded-md border overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setWwDiscountType("flat")}
+          className={`px-1.5 py-0.5 text-[10px] font-bold ${
+            wwDiscountType === "flat" ? "bg-purple-700 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          ₹ Flat
+        </button>
+        <button
+          type="button"
+          onClick={() => setWwDiscountType("percent")}
+          className={`px-1.5 py-0.5 text-[10px] font-bold ${
+            wwDiscountType === "percent" ? "bg-purple-700 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          % Off
+        </button>
+      </div>
+    </div>
+    <div className="flex gap-1.5 items-center">
+      <input
+        type="number"
+        min="0"
+        max={wwDiscountType === "percent" ? 100 : undefined}
+        placeholder={wwDiscountType === "percent" ? "e.g. 10%" : "e.g. 5000"}
+        value={wwDiscount || ""}
+        onChange={(e) => setWwDiscount(Number(e.target.value))}
+        className="w-full border-2 border-purple-300 p-1.5 rounded-lg font-bold text-xs text-right bg-white outline-none"
+      />
+    </div>
+  </div>
+
+  {/* DYNAMIC LIVE PRICE PREVIEW BOX */}
+  <div className="sm:col-span-2 flex flex-col justify-end">
+    {(() => {
+      let unitPrice = wwMasterItem?.price || 0;
+      if (wwVariantId) {
+        const v = wwMasterItem?.variants?.find((x: any) => x.id === wwVariantId);
+        if (v) unitPrice = v.price;
+      }
+      const daysMultiplier = wwIsDayApplicable ? Math.max(1, wwDays) : 1;
+      const baseSubtotal = unitPrice * Math.max(1, wwQty) * daysMultiplier;
+      const discAmt = wwDiscountType === "percent" 
+        ? Math.round((baseSubtotal * (Number(wwDiscount) || 0)) / 100) 
+        : Math.min(baseSubtotal, Number(wwDiscount) || 0);
+      const liveNet = Math.max(0, baseSubtotal - discAmt);
+
+      return (
+        <div className="bg-emerald-50 border-2 border-emerald-400 p-1.5 rounded-lg text-right">
+          <span className="block text-[9px] font-black uppercase text-emerald-800">Preview Net Total</span>
+          <span className="text-xs font-black font-mono text-emerald-950">
+            ₹{liveNet.toLocaleString()}
+          </span>
+          {discAmt > 0 && (
+            <span className="block text-[9px] font-bold text-red-600">
+              (-₹{discAmt.toLocaleString()})
+            </span>
+          )}
+        </div>
+      );
+    })()}
+  </div>
               </div>
 
               <div className="flex items-center gap-2 pt-0.5">
@@ -1278,29 +1429,68 @@ export default function LeadQuotationWorkspace() {
                     {/* Add Item to Event Form */}
                     <div className="bg-white p-3 rounded-xl border space-y-2 text-xs">
                       <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                        <div className="sm:col-span-4">
-                          <label className="block text-[11px] font-black text-gray-700 mb-0.5">Item *</label>
-                          <select
-                            value={activeEventIndexForAdd === evIdx ? evItemId : ""}
-                            onChange={(e) => {
-                              const id = e.target.value;
-                              setActiveEventIndexForAdd(evIdx);
-                              setEvItemId(id);
-                              setEvVariantId("");
-                              const it = otherItemsLibrary.find((x) => x.id === id);
-                              if (it && checkIsDayUnit(it.pricingUnit)) setEvIsDayApplicable(true);
-                              else setEvIsDayApplicable(false);
-                            }}
-                            className="w-full border p-1.5 rounded-lg font-bold text-xs bg-white text-gray-900"
-                          >
-                            <option value="">-- Choose Item for {evSection.eventName} --</option>
-                            {otherItemsLibrary.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                [{item.category}] {item.name} {item.price ? `(₹${item.price} / ${item.pricingUnit === "Custom Unit" ? item.customUnit : item.pricingUnit})` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <div className="sm:col-span-4 relative">
+  <label className="block text-[11px] font-black text-gray-700 mb-0.5">Search & Select Item *</label>
+  <input
+    type="text"
+    placeholder={`Search item for ${evSection.eventName}...`}
+    value={activeEventIndexForAdd === evIdx ? evSearchQuery : ""}
+    onFocus={() => {
+      setActiveEventIndexForAdd(evIdx);
+      setEvDropdownOpen(true);
+    }}
+    onChange={(e) => {
+      setActiveEventIndexForAdd(evIdx);
+      setEvSearchQuery(e.target.value);
+      setEvDropdownOpen(true);
+      if (!e.target.value) setEvItemId("");
+    }}
+    className="w-full border-2 border-blue-400 p-1.5 rounded-lg font-bold text-xs bg-white text-gray-900 outline-none"
+  />
+
+  {evDropdownOpen && activeEventIndexForAdd === evIdx && (
+    <>
+      {/* Click outside backdrop */}
+      <div className="fixed inset-0 z-10" onClick={() => setEvDropdownOpen(false)} />
+
+      {/* Filtered Dropdown list */}
+      <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-blue-500 rounded-lg shadow-xl max-h-56 overflow-y-auto z-20">
+        {otherItemsLibrary
+          .map((item) => {
+            const label = `[${item.category}] ${item.name}`;
+            return { item, label, score: getFuzzyScore(evSearchQuery, label) };
+          })
+          .filter((res) => !evSearchQuery || res.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(({ item, label }) => (
+            <div
+              key={item.id}
+              onClick={() => {
+                setEvItemId(item.id);
+                setEvSearchQuery(label);
+                setEvVariantId("");
+                if (checkIsDayUnit(item.pricingUnit)) setEvIsDayApplicable(true);
+                else setEvIsDayApplicable(false);
+                setEvDropdownOpen(false);
+              }}
+              className="p-2 text-xs hover:bg-blue-100 cursor-pointer border-b last:border-0 font-medium text-gray-800 flex justify-between"
+            >
+              <span>{label}</span>
+              <span className="font-mono text-blue-900 font-bold">
+                {item.price ? `₹${item.price}` : ""}
+              </span>
+            </div>
+          ))}
+
+        {otherItemsLibrary.filter((i) => getFuzzyScore(evSearchQuery, `[${i.category}] ${i.name}`) > 0).length === 0 && (
+          <div className="p-3 text-xs text-gray-400 text-center font-bold italic">
+            No item matched your search.
+          </div>
+        )}
+      </div>
+    </>
+  )}
+</div>
 
                         <div className="sm:col-span-3">
                           <label className="block text-[11px] font-black text-gray-700 mb-0.5">Option / Variant</label>
@@ -1356,20 +1546,88 @@ export default function LeadQuotationWorkspace() {
                           )}
                         </div>
 
-                        <div className="sm:col-span-2">
-                          <label className="block text-[11px] font-black text-gray-700 mb-0.5">Discount (₹)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            placeholder="Discount"
-                            value={activeEventIndexForAdd === evIdx ? (evDiscount || "") : ""}
-                            onChange={(e) => {
-                              setActiveEventIndexForAdd(evIdx);
-                              setEvDiscount(Number(e.target.value));
-                            }}
-                            className="w-full border p-1.5 rounded-lg font-bold text-xs text-right bg-white"
-                          />
-                        </div>
+                        {/* EVENT DISCOUNT TYPE & VALUE */}
+  <div className="sm:col-span-3">
+    <div className="flex justify-between items-center mb-0.5">
+      <label className="text-[11px] font-black text-gray-700">Discount</label>
+      <div className="inline-flex rounded-md border overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveEventIndexForAdd(evIdx);
+            setEvDiscountType("flat");
+          }}
+          className={`px-1.5 py-0.5 text-[10px] font-bold ${
+            (activeEventIndexForAdd === evIdx && evDiscountType === "flat") || activeEventIndexForAdd !== evIdx
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          ₹ Flat
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveEventIndexForAdd(evIdx);
+            setEvDiscountType("percent");
+          }}
+          className={`px-1.5 py-0.5 text-[10px] font-bold ${
+            activeEventIndexForAdd === evIdx && evDiscountType === "percent"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          % Off
+        </button>
+      </div>
+    </div>
+    <input
+      type="number"
+      min="0"
+      max={evDiscountType === "percent" ? 100 : undefined}
+      placeholder={evDiscountType === "percent" ? "e.g. 10%" : "e.g. 5000"}
+      value={activeEventIndexForAdd === evIdx ? (evDiscount || "") : ""}
+      onChange={(e) => {
+        setActiveEventIndexForAdd(evIdx);
+        setEvDiscount(Number(e.target.value));
+      }}
+      className="w-full border-2 border-blue-300 p-1.5 rounded-lg font-bold text-xs text-right bg-white outline-none"
+    />
+  </div>
+
+  {/* DYNAMIC LIVE PRICE PREVIEW BOX */}
+  <div className="sm:col-span-2 flex flex-col justify-end">
+    {(() => {
+      let unitPrice = (activeEventIndexForAdd === evIdx ? evMasterItem?.price : 0) || 0;
+      if (activeEventIndexForAdd === evIdx && evVariantId) {
+        const v = evMasterItem?.variants?.find((x: any) => x.id === evVariantId);
+        if (v) unitPrice = v.price;
+      }
+      const daysMultiplier = (activeEventIndexForAdd === evIdx && evIsDayApplicable) ? Math.max(1, evDays) : 1;
+      const curQty = activeEventIndexForAdd === evIdx ? evQty : 1;
+      const baseSubtotal = unitPrice * Math.max(1, curQty) * daysMultiplier;
+      const curDisc = activeEventIndexForAdd === evIdx ? Number(evDiscount) || 0 : 0;
+      
+      const discAmt = evDiscountType === "percent"
+        ? Math.round((baseSubtotal * curDisc) / 100)
+        : Math.min(baseSubtotal, curDisc);
+      const liveNet = Math.max(0, baseSubtotal - discAmt);
+
+      return (
+        <div className="bg-emerald-50 border-2 border-emerald-400 p-1.5 rounded-lg text-right">
+          <span className="block text-[9px] font-black uppercase text-emerald-800">Preview Net Total</span>
+          <span className="text-xs font-black font-mono text-emerald-950">
+            ₹{liveNet.toLocaleString()}
+          </span>
+          {discAmt > 0 && (
+            <span className="block text-[9px] font-bold text-red-600">
+              (-₹{discAmt.toLocaleString()})
+            </span>
+          )}
+        </div>
+      );
+    })()}
+  </div>
                       </div>
 
                       <div className="flex items-center gap-2 pt-0.5">
