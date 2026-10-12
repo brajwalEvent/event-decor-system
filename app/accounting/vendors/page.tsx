@@ -133,33 +133,28 @@ export default function VendorAccountingPage(): React.ReactElement {
       const userSnap = await getDocs(collection(db, "users"));
       setStaffList(userSnap.docs.map((d) => ({ uid: d.id, ...d.data() })));
 
-      // ✅ NEW CODE (Looking in your CRM "leads" collection)
-const leadsSnap = await getDocs(collection(db, "leads")).catch(() => ({ docs: [] }));
-const bookedWeddings = leadsSnap.docs
-  .map((d) => ({ id: d.id, ...d.data() } as any))
-  .filter((w) => {
-    const status = (w.status || "").toLowerCase();
-    return (
-      status.includes("booked") ||
-      status.includes("deal closed") ||
-      status.includes("negotiation")
-    );
-  })
-  .map((w) => ({
-    id: w.id,
-    // Extract client/wedding title
-    title: w.title || w.clientName || `Wedding #${w.id}`,
-    resortName: w.resortName || "Resort TBD",
-    // Extract agreed deal amount (fallback to quotation final offered price)
-    closedDealAmount: Number(w.closedDealAmount || w.quotation?.finalOfferedPrice || 0),
-    // Extract advance & received payments
-    advanceBookingAmount: Number(w.advanceBookingAmount || 0),
-    receivedPayments: w.receivedPayments || [],
-    // Extract milestone schedule
-    paymentMilestones: w.quotation?.paymentMilestones || [],
-  }));
+      const leadsSnap = await getDocs(collection(db, "leads")).catch(() => ({ docs: [] }));
+      const bookedWeddings = leadsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as any))
+        .filter((w) => {
+          const status = (w.status || "").toLowerCase();
+          return (
+            status.includes("booked") ||
+            status.includes("deal closed") ||
+            status.includes("negotiation")
+          );
+        })
+        .map((w) => ({
+          id: w.id,
+          title: w.title || w.clientName || `Wedding #${w.id}`,
+          resortName: w.resortName || "Resort TBD",
+          closedDealAmount: Number(w.closedDealAmount || w.quotation?.finalOfferedPrice || 0),
+          advanceBookingAmount: Number(w.advanceBookingAmount || 0),
+          receivedPayments: w.receivedPayments || [],
+          paymentMilestones: w.quotation?.paymentMilestones || [],
+        }));
 
-setCrmWeddings(bookedWeddings);
+      setCrmWeddings(bookedWeddings);
 
       const catSnap = await getDocs(collection(db, "accounting_categories")).catch(() => ({ docs: [] }));
       const dynamicCats = catSnap.docs.map((d) => d.data().name).filter(Boolean);
@@ -182,7 +177,6 @@ setCrmWeddings(bookedWeddings);
   // Fetch purchases & transactions without composite index requirements
   const fetchVendorLedger = async (vendorId: string) => {
     try {
-      // Purchases query with in-memory sorting
       const pQ = query(
         collection(db, "accounting_vendor_purchases"),
         where("vendorId", "==", vendorId)
@@ -193,7 +187,6 @@ setCrmWeddings(bookedWeddings);
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setPurchases(pList);
 
-      // Payments query with in-memory sorting
       const tQ = query(
         collection(db, "accounting_vendor_transactions"),
         where("vendorId", "==", vendorId)
@@ -221,7 +214,7 @@ setCrmWeddings(bookedWeddings);
     return await getDownloadURL(fileRef);
   };
 
-  // Submit: Onboard New Vendor (No OTP Required)
+  // Submit: Onboard New Vendor
   const handleCreateVendor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newVendorName.trim() || !newVendorMobile.trim()) return;
@@ -286,7 +279,6 @@ setCrmWeddings(bookedWeddings);
 
       await setDoc(vendorDocRef, newVendor);
 
-      // Tamper-proof audit log
       await recordAuditLog(user, {
         module: "VENDOR_LEDGER",
         action: "CREATE",
@@ -316,7 +308,7 @@ setCrmWeddings(bookedWeddings);
     }
   };
 
-  // Submit: Add/Update Bank Details (No OTP Required, Strongly Logged)
+  // Submit: Add/Update Bank Details
   const handleUpdateBankDetails = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !selectedVendor) return;
@@ -359,7 +351,6 @@ setCrmWeddings(bookedWeddings);
 
       await updateDoc(doc(db, "accounting_vendors", selectedVendor.id), updatePayload);
 
-      // Audit Log captures exact delta
       await recordAuditLog(user, {
         module: "VENDOR_BANK_UPDATE",
         action: "UPDATE",
@@ -394,6 +385,13 @@ setCrmWeddings(bookedWeddings);
     }
   };
 
+  // Helper to strip undefined values so Firestore doesn't crash
+  function cleanFirestoreData(data: Record<string, any>) {
+    return Object.fromEntries(
+      Object.entries(data).filter(([_, v]) => v !== undefined)
+    );
+  }
+
   // Submit: Log Purchase
   const handleRecordPurchase = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -402,8 +400,8 @@ setCrmWeddings(bookedWeddings);
     const parsedAmount = Number(purchAmount);
     const chosenStaff = staffList.find((s) => s.uid === purchStaffUid);
     const linkedWeddingNames = crmWeddings
-  .filter((w) => purchWeddings.includes(w.id))
-  .map((w) => w.title || w.clientName || `Wedding #${w.id}`);
+      .filter((w) => purchWeddings.includes(w.id))
+      .map((w) => w.title || w.clientName || `Wedding #${w.id}`);
 
     try {
       const purchaseData: Omit<VendorPurchase, "id"> = {
@@ -420,14 +418,13 @@ setCrmWeddings(bookedWeddings);
         isRecurring: purchIsRecurring,
         recurringFrequency: purchIsRecurring ? purchFreq : undefined,
         createdAt: new Date().toISOString(),
-        createdByUid: user.uid,
+        createdByUid: user?.uid || "",
       };
 
-      // 🔑 Pass through cleaner before saving to Firestore
-await addDoc(
-  collection(db, "accounting_vendor_purchases"), 
-  cleanFirestoreData(purchaseData)
-);
+      await addDoc(
+        collection(db, "accounting_vendor_purchases"),
+        cleanFirestoreData(purchaseData)
+      );
 
       const updatedBalance = selectedVendor.currentBalance + parsedAmount;
       const updatedTotalPurchases = selectedVendor.totalPurchases + parsedAmount;
@@ -469,13 +466,6 @@ await addDoc(
       alert("Failed to log purchase: " + err.message);
     }
   };
- 
-  // Helper to strip undefined values so Firestore doesn't crash
-function cleanFirestoreData(data: Record<string, any>) {
-  return Object.fromEntries(
-    Object.entries(data).filter(([_, v]) => v !== undefined)
-  );
-}
 
   // Submit: Log Payment
   const handleRecordPayment = async (e: React.FormEvent) => {
@@ -514,7 +504,7 @@ function cleanFirestoreData(data: Record<string, any>) {
         remarks: payRemarks.trim(),
         createdAt: new Date().toISOString(),
         createdByUid: user?.uid || "",
-        createdByEmail: user.email || "Unknown",
+        createdByEmail: user?.email || "Unknown",
       };
 
       await addDoc(collection(db, "accounting_vendor_transactions"), txnData);
@@ -572,14 +562,14 @@ function cleanFirestoreData(data: Record<string, any>) {
     <div className="min-h-screen bg-[#f8f9fa] text-neutral-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
 
-      <div className="mb-4">
-  <button
-    onClick={() => router.push("/accounting")}
-    className="text-xs font-bold text-gray-700 hover:text-black flex items-center gap-1 bg-white border border-gray-300 px-3.5 py-1.5 rounded-lg shadow-sm transition"
-  >
-    ← Back to Accounting Dashboard
-  </button>
-</div>
+        <div className="mb-4">
+          <button
+            onClick={() => router.push("/accounting")}
+            className="text-xs font-bold text-gray-700 hover:text-black flex items-center gap-1 bg-white border border-gray-300 px-3.5 py-1.5 rounded-lg shadow-sm transition"
+          >
+            ← Back to Accounting Dashboard
+          </button>
+        </div>
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-neutral-300 gap-4">
@@ -829,33 +819,31 @@ function cleanFirestoreData(data: Record<string, any>) {
                                 </td>
                                 <td className="p-3.5 max-w-xs">{p.itemsDescription}</td>
                                 <td className="p-3.5 text-neutral-600 whitespace-nowrap">{p.purchaseMadeByStaffName}</td>
-                                {/* ✅ NEW CODE IN PURCHASES TABLE */}
-<td className="p-3.5 max-w-xs">
-  {(() => {
-    // Fallback logic if older records only saved IDs instead of names
-    const displayNames =
-      p.linkedWeddingNames && p.linkedWeddingNames.length > 0
-        ? p.linkedWeddingNames
-        : crmWeddings
-            .filter((w) => p.linkedWeddingIds?.includes(w.id))
-            .map((w) => w.title || w.clientName);
+                                <td className="p-3.5 max-w-xs">
+                                  {(() => {
+                                    const displayNames =
+                                      p.linkedWeddingNames && p.linkedWeddingNames.length > 0
+                                        ? p.linkedWeddingNames
+                                        : crmWeddings
+                                            .filter((w) => p.linkedWeddingIds?.includes(w.id))
+                                            .map((w) => w.title || w.clientName);
 
-    return displayNames.length > 0 ? (
-      <div className="flex flex-wrap gap-1">
-        {displayNames.map((wName, i) => (
-          <span
-            key={i}
-            className="text-[9px] bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200"
-          >
-            💍 {wName}
-          </span>
-        ))}
-      </div>
-    ) : (
-      <span className="text-neutral-400">—</span>
-    );
-  })()}
-</td>
+                                    return displayNames.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {displayNames.map((wName, i) => (
+                                          <span
+                                            key={i}
+                                            className="text-[9px] bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200"
+                                          >
+                                            💍 {wName}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-neutral-400">—</span>
+                                    );
+                                  })()}
+                                </td>
                                 <td className="p-3.5 whitespace-nowrap">
                                   {p.isRecurring ? (
                                     <span className="text-[10px] bg-purple-50 text-purple-900 border border-purple-300 px-2 py-0.5 rounded font-black">
@@ -1428,68 +1416,65 @@ function cleanFirestoreData(data: Record<string, any>) {
                 ) : (
                   <div className="max-h-36 overflow-y-auto border border-neutral-300 p-2 rounded-lg bg-neutral-50 space-y-1">
                     {crmWeddings.map((w) => {
-  const isChecked = purchWeddings.includes(w.id); // (or expenseWeddings if you are in general/page.tsx)
-  
-  return (
-    <label
-      key={w.id}
-      className="flex items-center gap-2 p-1.5 rounded hover:bg-white cursor-pointer transition text-[11px]"
-    >
-      <input
-        type="checkbox"
-        checked={isChecked}
-        onChange={(e) => {
-          if (e.target.checked) {
-            setPurchWeddings([...purchWeddings, w.id]); 
-            // Note: use setExpenseWeddings instead if you are in general/page.tsx
-          } else {
-            setPurchWeddings(purchWeddings.filter((id) => id !== w.id));
-          }
-        }}
-      />
-      <span className="font-bold text-neutral-800">
-        💍 {w.title} — {w.resortName} (Deal: ₹{w.closedDealAmount?.toLocaleString()})
-      </span>
-    </label>
-  );
-})}
+                      const isChecked = purchWeddings.includes(w.id);
+                      return (
+                        <label
+                          key={w.id}
+                          className="flex items-center gap-2 p-1.5 rounded hover:bg-white cursor-pointer transition text-[11px]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setPurchWeddings([...purchWeddings, w.id]);
+                              } else {
+                                setPurchWeddings(purchWeddings.filter((id) => id !== w.id));
+                              }
+                            }}
+                          />
+                          <span className="font-bold text-neutral-800">
+                            💍 {w.title} — {w.resortName} (Deal: ₹{w.closedDealAmount?.toLocaleString()})
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
               {/* Recurring Purchase Section */}
-<div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200 space-y-3">
-  <label className="flex items-center gap-2 cursor-pointer">
-    <input
-      type="checkbox"
-      checked={purchIsRecurring}
-      onChange={(e) => setPurchIsRecurring(e.target.checked)}
-    />
-    <span className="font-black text-neutral-950 uppercase">
-      7. Is this a Recurring Purchase? (Optional)
-    </span>
-  </label>
+              <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={purchIsRecurring}
+                    onChange={(e) => setPurchIsRecurring(e.target.checked)}
+                  />
+                  <span className="font-black text-neutral-950 uppercase">
+                    7. Is this a Recurring Purchase? (Optional)
+                  </span>
+                </label>
 
-  {/* Frequency dropdown only appears IF checkbox is checked */}
-  {purchIsRecurring && (
-    <div>
-      <label className="block text-[10px] font-bold text-neutral-700 mb-1 uppercase">
-        8. Recurring Frequency *
-      </label>
-      <select
-        value={purchFreq}
-        onChange={(e) => setPurchFreq(e.target.value as any)}
-        className="w-full border border-neutral-300 p-2 rounded bg-white font-bold"
-      >
-        <option value="Daily">Daily</option>
-        <option value="Weekly">Weekly</option>
-        <option value="Monthly">Monthly</option>
-        <option value="Quarterly">Quarterly</option>
-        <option value="Yearly">Yearly</option>
-      </select>
-    </div>
-  )}
-</div>
+                {purchIsRecurring && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-neutral-700 mb-1 uppercase">
+                      8. Recurring Frequency *
+                    </label>
+                    <select
+                      value={purchFreq}
+                      onChange={(e) => setPurchFreq(e.target.value as any)}
+                      className="w-full border border-neutral-300 p-2 rounded bg-white font-bold"
+                    >
+                      <option value="Daily">Daily</option>
+                      <option value="Weekly">Weekly</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Quarterly">Quarterly</option>
+                      <option value="Yearly">Yearly</option>
+                    </select>
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-neutral-200">
                 <button

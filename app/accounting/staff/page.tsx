@@ -27,7 +27,7 @@ export default function StaffAccountingPage(): React.ReactElement {
   const router = useRouter();
 
   // Access Guard
-  const isAccountant = role === "accountant";
+  const isAccountant = (role as any) === "accountant";
   const canAccess = isSuperAdmin || isAccountant || role === "admin";
 
   const [availableUsers, setAvailableUsers] = useState<any[]>([]);
@@ -123,7 +123,6 @@ export default function StaffAccountingPage(): React.ReactElement {
   }, [selectedStaff]);
 
   // Open New Account
-  // Open New Account
   const handleCreateStaffAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !selectedUserUid || !monthlySalaryInput) return;
@@ -168,7 +167,6 @@ export default function StaffAccountingPage(): React.ReactElement {
     }
   };
 
-  // Submit Payment/Ledger Transaction (no undefined fields)
   // Submit Payment/Ledger Transaction (no undefined fields)
   const handleRecordTransaction = async (e: React.FormEvent) => {
     e.preventDefault();

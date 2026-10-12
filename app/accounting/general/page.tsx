@@ -27,7 +27,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   const { user, role, isSuperAdmin, loading } = useAuth();
   const router = useRouter();
 
-  const isAccountant = role === "accountant";
+  const isAccountant = (role as any) === "accountant";
   const canAccess = isSuperAdmin || isAccountant || role === "admin";
 
   // Data States
@@ -121,33 +121,28 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       const userSnap = await getDocs(collection(db, "users"));
       setStaffList(userSnap.docs.map((d) => ({ uid: d.id, ...d.data() })));
 
-      // ✅ NEW CODE (Looking in your CRM "leads" collection)
-const leadsSnap = await getDocs(collection(db, "leads")).catch(() => ({ docs: [] }));
-const bookedWeddings = leadsSnap.docs
-  .map((d) => ({ id: d.id, ...d.data() } as any))
-  .filter((w) => {
-    const status = (w.status || "").toLowerCase();
-    return (
-      status.includes("booked") ||
-      status.includes("deal closed") ||
-      status.includes("negotiation")
-    );
-  })
-  .map((w) => ({
-    id: w.id,
-    // Extract client/wedding title
-    title: w.title || w.clientName || `Wedding #${w.id}`,
-    resortName: w.resortName || "Resort TBD",
-    // Extract agreed deal amount (fallback to quotation final offered price)
-    closedDealAmount: Number(w.closedDealAmount || w.quotation?.finalOfferedPrice || 0),
-    // Extract advance & received payments
-    advanceBookingAmount: Number(w.advanceBookingAmount || 0),
-    receivedPayments: w.receivedPayments || [],
-    // Extract milestone schedule
-    paymentMilestones: w.quotation?.paymentMilestones || [],
-  }));
+      const leadsSnap = await getDocs(collection(db, "leads")).catch(() => ({ docs: [] }));
+      const bookedWeddings = leadsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as any))
+        .filter((w) => {
+          const status = (w.status || "").toLowerCase();
+          return (
+            status.includes("booked") ||
+            status.includes("deal closed") ||
+            status.includes("negotiation")
+          );
+        })
+        .map((w) => ({
+          id: w.id,
+          title: w.title || w.clientName || `Wedding #${w.id}`,
+          resortName: w.resortName || "Resort TBD",
+          closedDealAmount: Number(w.closedDealAmount || w.quotation?.finalOfferedPrice || 0),
+          advanceBookingAmount: Number(w.advanceBookingAmount || 0),
+          receivedPayments: w.receivedPayments || [],
+          paymentMilestones: w.quotation?.paymentMilestones || [],
+        }));
 
-setCrmWeddings(bookedWeddings);
+      setCrmWeddings(bookedWeddings);
 
       const expTypeSnap = await getDocs(collection(db, "accounting_expense_types")).catch(() => ({ docs: [] }));
       const dynamicTypes = expTypeSnap.docs.map((d) => d.data().name).filter(Boolean);
@@ -167,7 +162,7 @@ setCrmWeddings(bookedWeddings);
     }
   }, [user, canAccess]);
 
-  // Fetch expenses with in-memory sorting (avoids composite index error)
+  // Fetch expenses with in-memory sorting
   const fetchFloatExpenses = async (floatId: string) => {
     try {
       const q = query(
@@ -222,7 +217,7 @@ setCrmWeddings(bookedWeddings);
   // Submit 1: Open Temporary Staff Float
   const handleOpenFloat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!disburseStaffUid || !initialAmount) return;
+    if (!user || !disburseStaffUid || !initialAmount) return;
 
     const chosenStaff = staffList.find((s) => s.uid === disburseStaffUid);
     const parsedAmount = Number(initialAmount);
@@ -252,7 +247,7 @@ setCrmWeddings(bookedWeddings);
         disbursementPaymentDetails: paymentDetails,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        createdByUid: user.uid,
+        createdByUid: user?.uid || "",
       };
 
       await setDoc(floatRef, newFloat);
@@ -289,7 +284,7 @@ setCrmWeddings(bookedWeddings);
   // Submit 2: Top-Up Active Float
   const handleTopUpFloat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFloat || !topUpAmount) return;
+    if (!user || !selectedFloat || !topUpAmount) return;
 
     const parsedAmount = Number(topUpAmount);
     const topUpPaymentDetails = buildPaymentDetails(
@@ -315,15 +310,14 @@ setCrmWeddings(bookedWeddings);
 
       await updateDoc(doc(db, "accounting_general_floats", selectedFloat.id), updatePayload);
 
-      // Record top-up transaction
       const topupRecord: any = {
         floatId: selectedFloat.id,
         amount: parsedAmount,
         date: topUpDate,
         paymentDetails: topUpPaymentDetails,
         createdAt: new Date().toISOString(),
-        createdByUid: user.uid,
-        createdByEmail: user.email || "Unknown",
+        createdByUid: user?.uid || "",
+        createdByEmail: user?.email || "Unknown",
       };
       if (topUpRemarks.trim()) {
         topupRecord.remarks = topUpRemarks.trim();
@@ -367,7 +361,7 @@ setCrmWeddings(bookedWeddings);
   // Submit 3: Log Field Expense
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFloat || !expenseAmount || !expenseDetails) return;
+    if (!user || !selectedFloat || !expenseAmount || !expenseDetails) return;
 
     const parsedAmount = Number(expenseAmount);
     const chosenType = isCreatingExpenseType ? customExpenseType.trim() : expenseType;
@@ -381,23 +375,22 @@ setCrmWeddings(bookedWeddings);
         setExpenseTypes((prev) => [...prev, customExpenseType.trim()]);
       }
 
-      // Extract names of selected weddings
-const linkedWeddingNames = crmWeddings
-  .filter((w) => expenseWeddings.includes(w.id))
-  .map((w) => w.title || w.clientName || `Wedding #${w.id}`);
+      const linkedWeddingNames = crmWeddings
+        .filter((w) => expenseWeddings.includes(w.id))
+        .map((w) => w.title || w.clientName || `Wedding #${w.id}`);
 
-const expenseData: any = {
-  floatId: selectedFloat.id,
-  staffUid: selectedFloat.staffUid,
-  purchaseType: chosenType,
-  amount: parsedAmount,
-  date: expenseDate,
-  purchaseDetails: expenseDetails.trim(),
-  linkedWeddingIds: expenseWeddings.length > 0 ? expenseWeddings : [],
-  linkedWeddingNames: linkedWeddingNames, // <--- Added this field
-  createdAt: new Date().toISOString(),
-  createdByUid: user.uid,
-};
+      const expenseData: any = {
+        floatId: selectedFloat.id,
+        staffUid: selectedFloat.staffUid,
+        purchaseType: chosenType,
+        amount: parsedAmount,
+        date: expenseDate,
+        purchaseDetails: expenseDetails.trim(),
+        linkedWeddingIds: expenseWeddings.length > 0 ? expenseWeddings : [],
+        linkedWeddingNames: linkedWeddingNames,
+        createdAt: new Date().toISOString(),
+        createdByUid: user?.uid || "",
+      };
 
       await addDoc(collection(db, "accounting_general_expenses"), expenseData);
 
@@ -444,7 +437,7 @@ const expenseData: any = {
 
   // Submit 4: Settle & Close Float
   const handleSettleFloat = async () => {
-    if (!selectedFloat) return;
+    if (!user || !selectedFloat) return;
     if (
       !window.confirm(
         `Close and settle Float Account for ${selectedFloat.staffName}? Remaining balance: ₹${selectedFloat.currentFloatBalance}`
@@ -457,7 +450,7 @@ const expenseData: any = {
       const updatePayload = {
         status: "SETTLED" as const,
         settledAt: new Date().toISOString(),
-        settledByUid: user.uid,
+        settledByUid: user?.uid || "",
         updatedAt: new Date().toISOString(),
       };
 
@@ -495,14 +488,14 @@ const expenseData: any = {
     <div className="min-h-screen bg-[#f8f9fa] text-neutral-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
 
-      <div className="mb-4">
-  <button
-    onClick={() => router.push("/accounting")}
-    className="text-xs font-bold text-gray-700 hover:text-black flex items-center gap-1 bg-white border border-gray-300 px-3.5 py-1.5 rounded-lg shadow-sm transition"
-  >
-    ← Back to Accounting Dashboard
-  </button>
-</div>
+        <div className="mb-4">
+          <button
+            onClick={() => router.push("/accounting")}
+            className="text-xs font-bold text-gray-700 hover:text-black flex items-center gap-1 bg-white border border-gray-300 px-3.5 py-1.5 rounded-lg shadow-sm transition"
+          >
+            ← Back to Accounting Dashboard
+          </button>
+        </div>
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-neutral-300 gap-4">
@@ -752,13 +745,12 @@ const expenseData: any = {
                           </tr>
                         ) : (
                           expenses.map((exp) => {
-                            // ✅ NEW TABLE DISPLAY CODE
-const matchedWeddings = 
-  exp.linkedWeddingNames && exp.linkedWeddingNames.length > 0
-    ? exp.linkedWeddingNames
-    : crmWeddings
-        .filter((w) => exp.linkedWeddingIds?.includes(w.id))
-        .map((w) => w.title || w.clientName);
+                            const matchedWeddings = 
+                              (exp as any).linkedWeddingNames && (exp as any).linkedWeddingNames.length > 0
+                                ? (exp as any).linkedWeddingNames
+                                : crmWeddings
+                                    .filter((w) => exp.linkedWeddingIds?.includes(w.id))
+                                    .map((w) => w.title || w.clientName);
 
                             return (
                               <tr key={exp.id} className="hover:bg-neutral-50/80 transition">
@@ -775,7 +767,7 @@ const matchedWeddings =
                                 <td className="p-3.5 max-w-xs">
                                   {matchedWeddings.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">
-                                      {matchedWeddings.map((m, i) => (
+                                      {matchedWeddings.map((m: any, i: number) => (
                                         <span
                                           key={i}
                                           className="text-[9px] bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200"
@@ -1204,30 +1196,29 @@ const matchedWeddings =
                 ) : (
                   <div className="max-h-32 overflow-y-auto border border-neutral-300 p-2 rounded-lg bg-neutral-50 space-y-1">
                     {crmWeddings.map((w) => {
-  const isChecked = expenseWeddings.includes(w.id);
-  
-  return (
-    <label
-      key={w.id}
-      className="flex items-center gap-2 p-1.5 rounded hover:bg-white cursor-pointer transition text-[11px]"
-    >
-      <input
-        type="checkbox"
-        checked={isChecked}
-        onChange={(e) => {
-          if (e.target.checked) {
-            setExpenseWeddings([...expenseWeddings, w.id]);
-          } else {
-            setExpenseWeddings(expenseWeddings.filter((id) => id !== w.id));
-          }
-        }}
-      />
-      <span className="font-bold text-neutral-800">
-        💍 {w.title} — {w.resortName} (Deal: ₹{w.closedDealAmount?.toLocaleString()})
-      </span>
-    </label>
-  );
-})}
+                      const isChecked = expenseWeddings.includes(w.id);
+                      return (
+                        <label
+                          key={w.id}
+                          className="flex items-center gap-2 p-1.5 rounded hover:bg-white cursor-pointer transition text-[11px]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setExpenseWeddings([...expenseWeddings, w.id]);
+                              } else {
+                                setExpenseWeddings(expenseWeddings.filter((id) => id !== w.id));
+                              }
+                            }}
+                          />
+                          <span className="font-bold text-neutral-800">
+                            💍 {w.title} — {w.resortName} (Deal: ₹{w.closedDealAmount?.toLocaleString()})
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
