@@ -22,9 +22,9 @@ export default function AccountingPage(): React.ReactElement {
   // SSR hydration safety flag
   const [isMounted, setIsMounted] = useState(false);
 
-  // Access rights
-  const isAccountant = (role as any) === "accountant";
-  const canAccess = isSuperAdmin || isAccountant || role === "admin";
+  // Access rights (Cast safely to bypass strict enum mismatch)
+  const isAccountant = (role as unknown as string) === "accountant";
+  const canAccess = isSuperAdmin || isAccountant || (role as unknown as string) === "admin";
 
   // Data states
   const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>([]);
