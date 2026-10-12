@@ -23,7 +23,7 @@ export default function AccountingPage(): React.ReactElement {
   const [isMounted, setIsMounted] = useState(false);
 
   // Access rights
-  const isAccountant = role === "accountant";
+  const isAccountant = (role as any) === "accountant";
   const canAccess = isSuperAdmin || isAccountant || role === "admin";
 
   // Data states
