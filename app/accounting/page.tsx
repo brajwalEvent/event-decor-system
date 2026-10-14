@@ -350,6 +350,12 @@ export default function AccountingPage(): React.ReactElement {
             >
               💳 Field Floats
             </Link>
+            <Link
+  href="/accounting/master-view"
+  className="px-4 py-2.5 rounded-lg font-black text-xs uppercase tracking-wider bg-purple-900 text-white hover:bg-purple-800 transition"
+>
+  🔍 Master View-Only Ledger
+</Link>
           </div>
         </div>
 

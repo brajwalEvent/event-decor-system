@@ -4,7 +4,9 @@ import { db, storage } from "../../lib/firebase";
 import { 
   collection, 
   addDoc, 
-  getDocs, 
+  getDocs,
+  getDoc,
+  setDoc, 
   query, 
   orderBy, 
   doc, 
@@ -26,6 +28,8 @@ export default function ComponentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  // VIEW COMPONENT MODAL STATE
+  const [viewComponentData, setViewComponentData] = useState<any | null>(null);
 
   // 3-WAY FILTER STATES
   const [filterCategory, setFilterCategory] = useState("All");
@@ -149,6 +153,16 @@ export default function ComponentsPage() {
     } catch (err) {
       console.error("Error loading data:", err);
     }
+    // Load saved custom component categories
+      try {
+        const catDoc = await getDoc(doc(db, "metadata", "component_categories"));
+        if (catDoc.exists() && catDoc.data().list) {
+          const savedList = catDoc.data().list;
+          setCategories(Array.from(new Set([...categories, ...savedList])));
+        }
+      } catch (e) {
+        console.error("Error loading custom categories:", e);
+      }
   };
 
   useEffect(() => {
@@ -434,7 +448,13 @@ export default function ComponentsPage() {
     setSubmitting(true);
 
     try {
+      // PERMANENT CATEGORY SAVING
       const finalCategory = isCustomCategory ? customCategoryInput.trim() : category;
+      if (isCustomCategory && finalCategory && !categories.includes(finalCategory)) {
+        const updatedCats = [...categories, finalCategory];
+        setCategories(updatedCats);
+        await setDoc(doc(db, "metadata", "component_categories"), { list: updatedCats }, { merge: true }).catch(() => {});
+      }
       if (isCustomCategory && finalCategory && !categories.includes(finalCategory)) {
         setCategories((prev) => [...prev, finalCategory]);
       }
@@ -733,6 +753,12 @@ export default function ComponentsPage() {
 
                 {role !== "sales" && (
                   <div className="p-4 border-t border-gray-200 grid grid-cols-2 gap-2 bg-gray-50">
+                    <button
+                    onClick={() => setViewComponentData(comp)}
+                    className="w-full bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 font-bold py-2 rounded text-xs transition"
+                  >
+                    🔍 View Component Details
+                  </button>
                     <button
                       onClick={() => openEditModal(comp)}
                       className="w-full bg-white border-2 border-gray-300 hover:bg-gray-100 text-gray-900 font-bold py-2 rounded text-sm transition"
@@ -1358,6 +1384,100 @@ export default function ComponentsPage() {
                 {filteredElements.length === 0 && (
                   <div className="col-span-full py-16 text-center text-gray-500 font-bold">
                     No elements found matching this filter.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* VIEW COMPONENT DETAILS MODAL (READ-ONLY) */}
+        {viewComponentData && (
+          <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 md:p-6 z-50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border-2 border-gray-400">
+              <div className="p-4 md:p-6 border-b-2 border-gray-200 bg-gray-50 flex justify-between items-center">
+                <div>
+                  <span className="text-[10px] font-black uppercase text-blue-900 bg-blue-100 px-2 py-0.5 rounded border border-blue-200">
+                    {viewComponentData.category}
+                  </span>
+                  <h2 className="text-2xl font-black text-gray-900 mt-1">{viewComponentData.name}</h2>
+                  <p className="text-xs text-gray-500 font-mono mt-0.5">Code: {viewComponentData.code || "COMP"}</p>
+                </div>
+                <button
+                  onClick={() => setViewComponentData(null)}
+                  className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs shadow"
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="flex flex-col md:flex-row gap-6">
+                  {/* Left: Image */}
+                  <div className="md:w-1/2">
+                    <div className="w-full h-64 bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300">
+                      {viewComponentData.images?.[0] ? (
+                        <img src={viewComponentData.images[0]} alt={viewComponentData.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-xs font-bold text-gray-400">No Photo</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: Specifications */}
+                  <div className="md:w-1/2 space-y-4 text-sm">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                      <h4 className="font-black text-xs uppercase text-gray-500 border-b pb-1">Specifications</h4>
+                      {viewComponentData.theme && <p>🎨 <strong>Theme:</strong> {viewComponentData.theme}</p>}
+                      <p>📐 <strong>Dimensions:</strong> {viewComponentData.dimensions?.length}×{viewComponentData.dimensions?.width}×{viewComponentData.dimensions?.height} {viewComponentData.dimensions?.unit}</p>
+                      <p>💰 <strong>Base Cost:</strong> ₹{viewComponentData.baseCost?.toLocaleString()}</p>
+                      
+                      {viewComponentData.events?.length > 0 && (
+                        <div className="pt-2">
+                          <strong className="block text-xs mb-1">Assigned Events:</strong>
+                          <div className="flex flex-wrap gap-1">
+                            {viewComponentData.events.map((ev: string, idx: number) => (
+                              <span key={idx} className="bg-purple-100 text-purple-900 font-bold px-2 py-0.5 rounded text-[10px]">
+                                {ev}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Warehouse Props List */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-sm uppercase text-gray-800 border-b pb-1">📦 Attached Warehouse Props</h4>
+                  {viewComponentData.warehouseElements?.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {viewComponentData.warehouseElements.map((el: any, idx: number) => (
+                        <div key={idx} className="bg-white border border-gray-200 p-3 rounded-lg flex items-center gap-3 shadow-sm">
+                          <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden border flex-shrink-0">
+                            {el.imageUrl ? <img src={el.imageUrl} alt={el.elementName} className="w-full h-full object-cover" /> : <span className="text-[8px] text-gray-400 flex items-center justify-center h-full">No Pic</span>}
+                          </div>
+                          <div className="text-xs">
+                            <p className="font-bold text-gray-900">{el.quantity}x {el.elementName}</p>
+                            {el.notes && <p className="text-gray-500 italic mt-0.5">Note: {el.notes}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic">No warehouse props assigned.</p>
+                  )}
+                </div>
+
+                {/* Assembly Steps */}
+                {viewComponentData.steps?.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-black text-sm uppercase text-gray-800 border-b pb-1">🪜 Assembly Steps</h4>
+                    <ol className="list-decimal list-inside space-y-1 bg-gray-50 p-3 rounded-lg border text-xs font-semibold text-gray-800">
+                      {viewComponentData.steps.map((st: string, idx: number) => (
+                        <li key={idx}>{st}</li>
+                      ))}
+                    </ol>
                   </div>
                 )}
               </div>

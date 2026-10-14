@@ -113,6 +113,19 @@ export default function LeadQuotationWorkspace() {
   const [payMode, setPayMode] = useState("Bank Transfer / NEFT");
   const [payRef, setPayRef] = useState("");
 
+  // EDIT LEAD DETAILS MODAL STATES
+  const [showEditLeadModal, setShowEditLeadModal] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editResortName, setEditResortName] = useState("");
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editPaxCount, setEditPaxCount] = useState<number | "">("");
+  const [editSalesName, setEditSalesName] = useState("");
+  const [editSalesPhone, setEditSalesPhone] = useState("");
+  const [editFamilyPocName, setEditFamilyPocName] = useState("");
+  const [editFamilyPocPhone, setEditFamilyPocPhone] = useState("");
+  const [savingLeadDetails, setSavingLeadDetails] = useState(false);
+
   // Quotation Setup
   const [validityDate, setValidityDate] = useState("");
   const [decorCost, setDecorCost] = useState<number>(0);
@@ -327,6 +340,65 @@ export default function LeadQuotationWorkspace() {
       activityLogs: updatedLogs,
       updatedAt: new Date().toISOString(),
     });
+  };
+   
+   // 1. OPEN LEAD EDIT MODAL & PREFILL VALUES
+  const handleOpenEditLeadModal = () => {
+    if (!lead) return;
+    setEditTitle(lead.title || "");
+    setEditResortName(lead.resortName || "");
+    setEditStartDate(lead.startDate || "");
+    setEditEndDate(lead.endDate || "");
+    setEditPaxCount(lead.paxCount || "");
+    setEditSalesName(lead.salesLead?.name || "");
+    setEditSalesPhone(lead.salesLead?.phone || "");
+    setEditFamilyPocName(lead.familyPoc?.name || lead.clientName || "");
+    setEditFamilyPocPhone(lead.familyPoc?.phone || lead.phone || "");
+    setShowEditLeadModal(true);
+  };
+
+  // 2. SAVE UPDATED LEAD DETAILS TO FIRESTORE
+  const handleSaveLeadDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTitle.trim()) return alert("Wedding Title is required.");
+
+    setSavingLeadDetails(true);
+    try {
+      const updatedFields = {
+        title: editTitle.trim(),
+        resortName: editResortName.trim(),
+        startDate: editStartDate,
+        endDate: editEndDate,
+        paxCount: Number(editPaxCount) || 0,
+        familyPoc: {
+    name: editFamilyPocName.trim(),
+    phone: editFamilyPocPhone.trim(),
+  },
+  clientName: editFamilyPocName.trim(),
+  phone: editFamilyPocPhone.trim(),
+        salesLead: {
+          name: editSalesName.trim(),
+          phone: editSalesPhone.trim(),
+        },
+        updatedAt: new Date().toISOString(),
+      };
+
+      await updateDoc(doc(db, "leads", leadId), updatedFields);
+
+      // Update state locally so UI updates instantly
+      setLead({
+        ...lead,
+        ...updatedFields,
+      });
+
+      setShowEditLeadModal(false);
+      alert("✅ Lead specifications updated successfully!");
+    } catch (err: any) {
+      console.error("Error updating lead specifications:", err);
+      alert("Failed to update lead: " + err.message);
+    } finally {
+      setSavingLeadDetails(false);
+    }
   };
 
   // Helper check for overdue follow-up
@@ -635,6 +707,13 @@ export default function LeadQuotationWorkspace() {
               <span className={`text-xs font-black uppercase text-white px-3 py-1 rounded-full shadow ${currentStageObj.color}`}>
                 {currentStage} ({currentStageObj.probability}%)
               </span>
+              <button
+                onClick={handleOpenEditLeadModal}
+                className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-900 font-black px-2.5 py-1 rounded-md border border-amber-300 transition flex items-center gap-1 shadow-sm"
+                title="Edit wedding title, dates, guest count, resort"
+              >
+                ✏️ Edit Lead Info
+              </button>
             </div>
             <p className="text-xs font-semibold text-gray-600 mt-0.5">
               📍 {lead.resortName} | 📅 {lead.startDate} to {lead.endDate} | 👥 {lead.paxCount} Guests | 💼 {lead.salesLead?.name} ({lead.salesLead?.phone})
@@ -1988,6 +2067,170 @@ export default function LeadQuotationWorkspace() {
                   className="px-5 py-1.5 bg-green-700 hover:bg-green-800 text-white font-black rounded text-xs shadow"
                 >
                   Save Payment
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL: EDIT LEAD DETAILS */}
+      {showEditLeadModal && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 border-2 border-amber-400 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <div>
+                <h3 className="text-base font-black text-gray-900 uppercase">
+                  ✏️ Modify Lead & Event Specifications
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Update wedding details, guest count (Pax), dates, or resort location.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditLeadModal(false)}
+                className="text-gray-400 hover:text-black font-black text-xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveLeadDetails} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-black text-gray-700 mb-1">
+                  Wedding / Lead Title *
+                </label>
+                <input
+                  required
+                  placeholder="e.g. Rahul & Sneha Wedding"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-black text-gray-700 mb-1">
+                  Resort / Destination Venue *
+                </label>
+                <input
+                  required
+                  placeholder="e.g. The Leela Palace, Udaipur"
+                  value={editResortName}
+                  onChange={(e) => setEditResortName(e.target.value)}
+                  className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black text-gray-700 mb-1">
+                    Start Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black text-gray-700 mb-1">
+                    End Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editEndDate}
+                    onChange={(e) => setEditEndDate(e.target.value)}
+                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-black text-gray-700 mb-1">
+                  Estimated Guest Count (Pax) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="e.g. 350"
+                  value={editPaxCount}
+                  onChange={(e) => setEditPaxCount(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 border-t pt-3">
+    <div>
+      <label className="block font-black text-gray-700 mb-1">
+        Family POC Name
+      </label>
+      <input
+        placeholder="e.g. Mr. Rajesh Kapoor"
+        value={editFamilyPocName}
+        onChange={(e) => setEditFamilyPocName(e.target.value)}
+        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+      />
+    </div>
+
+    <div>
+      <label className="block font-black text-gray-700 mb-1">
+        Family POC Phone
+      </label>
+      <input
+        placeholder="e.g. +91 98220 12345"
+        value={editFamilyPocPhone}
+        onChange={(e) => setEditFamilyPocPhone(e.target.value)}
+        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-gray-900 bg-white"
+      />
+    </div>
+  </div>
+
+              <div className="grid grid-cols-2 gap-3 border-t pt-3">
+                <div>
+                  <label className="block font-black text-gray-700 mb-1">
+                    Sales Contact Name
+                  </label>
+                  <input
+                    placeholder="e.g. Priya Sharma"
+                    value={editSalesName}
+                    onChange={(e) => setEditSalesName(e.target.value)}
+                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-medium text-gray-900 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black text-gray-700 mb-1">
+                    Sales Contact Phone
+                  </label>
+                  <input
+                    placeholder="e.g. +91 98765 43210"
+                    value={editSalesPhone}
+                    onChange={(e) => setEditSalesPhone(e.target.value)}
+                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-medium text-gray-900 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowEditLeadModal(false)}
+                  className="px-4 py-2 border font-bold rounded-lg text-xs hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingLeadDetails}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-lg text-xs shadow transition disabled:opacity-50"
+                >
+                  {savingLeadDetails ? "Saving..." : "✓ Update Lead Info"}
                 </button>
               </div>
             </form>
