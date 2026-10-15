@@ -8,7 +8,6 @@ import { useAuth } from "../../../context/AuthContext";
 import { useRouter } from "next/navigation";
 import type {
   StaffTransaction,
-  VendorPurchase,
   VendorTransaction,
   GeneralStaffFloat,
   GeneralFloatExpense,
@@ -26,7 +25,6 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
 
   // Raw fetched data
   const [staffTxns, setStaffTxns] = useState<StaffTransaction[]>([]);
-  const [vendorPurchases, setVendorPurchases] = useState<VendorPurchase[]>([]);
   const [vendorTxns, setVendorTxns] = useState<VendorTransaction[]>([]);
   const [floats, setFloats] = useState<GeneralStaffFloat[]>([]);
   const [floatExpenses, setFloatExpenses] = useState<GeneralFloatExpense[]>([]);
@@ -35,6 +33,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
 
   // Filter States
   const [selectedModule, setSelectedModule] = useState<"ALL" | "STAFF" | "VENDOR" | "GENERAL" | "CLIENT">("ALL");
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [selectedMonth, setSelectedMonth] = useState<string>("ALL");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -53,26 +52,31 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
     }
   }, [isMounted, user, role, isSuperAdmin, loading, canAccess, router]);
 
+  // 🌟 REPLACE WITH THIS:
+  const [vendorsList, setVendorsList] = useState<any[]>([]); // Add this state at the top of your component if not already there
+
   const loadMasterData = async () => {
     try {
       setLoadingData(true);
       const [
         staffSnap,
-        vPurchSnap,
         vTxnSnap,
         floatSnap,
         expSnap,
         leadsSnap,
         usersSnap,
+        vendorsSnap, // 1. Added vendorsSnap
       ] = await Promise.all([
         getDocs(collection(db, "accounting_staff_transactions")),
-        getDocs(collection(db, "accounting_vendor_purchases")),
         getDocs(collection(db, "accounting_vendor_transactions")),
         getDocs(collection(db, "accounting_general_floats")),
         getDocs(collection(db, "accounting_general_expenses")),
         getDocs(collection(db, "leads")).catch(() => ({ docs: [] })),
         getDocs(collection(db, "users")),
+        getDocs(collection(db, "accounting_vendors")), // 2. Fetch vendors collection
       ]);
+
+      setVendorsList(vendorsSnap.docs.map(d => ({ id: d.id, ...d.data() }))); // 3. Save to state
 
       const uMap: Record<string, string> = {};
       usersSnap.docs.forEach((d) => {
@@ -82,7 +86,6 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
       setUsersMap(uMap);
 
       setStaffTxns(staffSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffTransaction)));
-      setVendorPurchases(vPurchSnap.docs.map((d) => ({ id: d.id, ...d.data() } as VendorPurchase)));
       setVendorTxns(vTxnSnap.docs.map((d) => ({ id: d.id, ...d.data() } as VendorTransaction)));
       setFloats(floatSnap.docs.map((d) => ({ id: d.id, ...d.data() } as GeneralStaffFloat)));
       setFloatExpenses(expSnap.docs.map((d) => ({ id: d.id, ...d.data() } as GeneralFloatExpense)));
@@ -107,7 +110,6 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
     crmLeads.forEach((lead) => {
       const clientName = lead.title || lead.clientName || `Wedding #${lead.id}`;
 
-      // Initial Advance / Token Payment if recorded
       if (Number(lead.advanceBookingAmount) > 0) {
         list.push({
           id: `${lead.id}_advance`,
@@ -123,8 +125,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
           raw: lead,
         });
       }
-
-      // Logged Received Payments
+     
       if (Array.isArray(lead.receivedPayments)) {
         lead.receivedPayments.forEach((pay: any) => {
           list.push({
@@ -162,60 +163,51 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
       });
     });
 
-    // 3. Vendor Purchases
-    vendorPurchases.forEach((p) => {
-      list.push({
-        id: p.id,
-        date: p.date || p.createdAt?.split("T")[0],
-        module: "VENDOR",
-        category: `PURCHASE (${p.type})`,
-        partyName: p.vendorName || "Vendor",
-        debit: p.amount,
-        credit: 0,
-        paymentMode: "Bill / Procurement",
-        accountOrUpi: p.linkedWeddingNames?.join(", ") || "General Purchase",
-        remarks: p.itemsDescription,
-        raw: p,
-      });
-    });
+    // NOTE: Vendor Purchases (Bills) are excluded from cash debit stream as they are unearned/unpaid liabilities. 
+    // Only actual cash disbursements below reduce the company liquid balance.
 
-    // 4. Vendor Transactions (Disbursements)
-    vendorTxns.forEach((t) => {
+    // 🌟 VENDOR TRANSACTIONS IN MASTER VIEW:
+    vendorTxns.forEach((t: any) => {
+      // It will now immediately read t.vendorName which we saved in Step 1!
+      const vendorName = t.vendorName || "Vendor Disbursement";
+
       list.push({
         id: t.id,
         date: t.date || t.createdAt?.split("T")[0],
         module: "VENDOR",
         category: `VENDOR ${t.type}`,
-        partyName: "Vendor Disbursement",
-        debit: 0,
-        credit: t.amount,
+        partyName: vendorName, // 👈 Displays the actual vendor name!
+        debit: t.amount,
+        credit: 0,
         paymentMode: t.paymentDetails?.mode || "—",
         accountOrUpi: t.paymentDetails?.upiId || t.paymentDetails?.toAccountNumber || t.paymentDetails?.transactionId || "—",
-        remarks: t.remarks || "Vendor Payment",
+        remarks: t.remarks || "Vendor Payment Disbursed",
         raw: t,
       });
     });
 
-    // 5. General Staff Floats
+    // 4. General Staff Floats (0 Debit to prevent double deduction)
     floats.forEach((f) => {
+      const totalDisbursed = f.initialDisbursedAmount + (f.totalTopUpAmount || 0);
       list.push({
         id: f.id,
         date: f.createdAt?.split("T")[0],
         module: "GENERAL",
-        category: `FLOAT DISBURSAL (${f.status})`,
+        category: `FLOAT ACCOUNT (${f.status})`,
         partyName: f.staffName,
-        debit: f.initialDisbursedAmount + (f.totalTopUpAmount || 0),
+        debit: 0,
         credit: 0,
         paymentMode: f.disbursementPaymentDetails?.mode || "—",
         accountOrUpi: f.disbursementPaymentDetails?.toAccountNumber || f.disbursementPaymentDetails?.upiId || "—",
-        remarks: `Initial Float: ₹${f.initialDisbursedAmount} + Topups: ₹${f.totalTopUpAmount || 0}`,
+        remarks: `Float Account Established. Total Disbursed Fund: ₹${totalDisbursed}`,
         raw: f,
       });
     });
 
-    // 6. General Float Expenses
+    // 5. General Float Expenses (Actual spend deducted here)
     floatExpenses.forEach((e) => {
       const parentFloat = floats.find((f) => f.id === e.floatId);
+      const totalDisbursed = parentFloat ? parentFloat.initialDisbursedAmount + (parentFloat.totalTopUpAmount || 0) : 0;
       list.push({
         id: e.id,
         date: e.date || e.createdAt?.split("T")[0],
@@ -226,13 +218,21 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
         credit: 0,
         paymentMode: "Petty Float Spend",
         accountOrUpi: "Staff Float Balance",
-        remarks: e.purchaseDetails,
+        remarks: `${e.purchaseDetails} (from ₹${totalDisbursed.toLocaleString()} Disbursed Float)`,
         raw: e,
       });
     });
 
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [staffTxns, vendorPurchases, vendorTxns, floats, floatExpenses, crmLeads, usersMap]);
+  }, [staffTxns, vendorTxns, floats, floatExpenses, crmLeads, usersMap]);
+  
+  const availableCategories = useMemo(() => {
+    const cats = new Set<string>();
+    unifiedLedger.forEach((item) => {
+      if (item.category) cats.add(item.category);
+    });
+    return Array.from(cats).sort();
+  }, [unifiedLedger]);
 
   // Filtered Ledger
   const filteredLedger = useMemo(() => {
@@ -241,7 +241,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
       if (selectedMonth !== "ALL" && item.date && !item.date.startsWith(selectedMonth)) return false;
       if (startDate && item.date && item.date < startDate) return false;
       if (endDate && item.date && item.date > endDate) return false;
-
+      if (selectedCategory !== "ALL" && item.category !== selectedCategory) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchParty = item.partyName?.toLowerCase().includes(q);
@@ -252,7 +252,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
 
       return true;
     });
-  }, [unifiedLedger, selectedModule, selectedMonth, startDate, endDate, searchQuery]);
+  }, [unifiedLedger, selectedModule, selectedCategory, selectedMonth, startDate, endDate, searchQuery]);
 
   const { totalDebit, totalCredit, netCompanyFlow } = useMemo(() => {
     let deb = 0;
@@ -263,6 +263,35 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
     });
     return { totalDebit: deb, totalCredit: cred, netCompanyFlow: cred - deb };
   }, [filteredLedger]);
+
+  // 📥 EXPORT TO EXCEL (CSV)
+  const handleExportExcel = () => {
+    const headers = ["Date", "Module", "Category", "Party / Beneficiary", "Debit", "Credit", "Mode", "Remarks"];
+    const rows = filteredLedger.map((item) => [
+      item.date,
+      item.module,
+      item.category,
+      `"${item.partyName}"`,
+      item.debit || 0,
+      item.credit || 0,
+      `"${item.paymentMode}"`,
+      `"${item.remarks?.replace(/"/g, '""')}"`,
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Master_Consolidated_Ledger_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // 📄 EXPORT TO PDF (Print Window)
+  const handleExportPDF = () => {
+    window.print();
+  };
 
   if (!isMounted || loading || loadingData) {
     return (
@@ -275,16 +304,31 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-neutral-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center justify-between pb-4 border-b border-neutral-300">
+        <div className="flex items-center justify-between pb-4 border-b border-neutral-300 print:hidden">
           <button
             onClick={() => router.push("/accounting")}
             className="text-xs font-bold text-gray-700 hover:text-black flex items-center gap-1 bg-white border border-gray-300 px-3.5 py-1.5 rounded-lg shadow-sm transition font-mono"
           >
             ← Back to Accounting Dashboard
           </button>
-          <span className="text-[10px] font-mono font-black uppercase bg-neutral-900 text-white px-3 py-1 rounded">
-            🔒 View-Only Master Ledger
-          </span>
+          
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportExcel}
+              className="px-3 py-1.5 bg-emerald-700 text-white font-black text-xs rounded-lg uppercase shadow hover:bg-emerald-800 transition font-mono"
+            >
+              📊 Export Excel (CSV)
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="px-3 py-1.5 bg-neutral-900 text-white font-black text-xs rounded-lg uppercase shadow hover:bg-neutral-800 transition font-mono"
+            >
+              📄 Print / PDF
+            </button>
+            <span className="text-[10px] font-mono font-black uppercase bg-neutral-900 text-white px-3 py-1 rounded ml-2">
+              🔒 View-Only Master Ledger
+            </span>
+          </div>
         </div>
 
         <div>
@@ -292,14 +336,14 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
             Master Consolidated Company Ledger
           </h1>
           <p className="text-xs text-neutral-500 font-mono mt-1">
-            Unified view of all Client Inflows, Staff, Vendor, and General Float transactions.
+            Unified view of all Client Inflows, Staff, Vendor Disbursals, and General Float expenses.
           </p>
         </div>
 
         {/* Summary KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono print:grid-cols-3">
           <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm">
-            <p className="text-[10px] uppercase font-black text-neutral-400">Total Outflows (Debits / Expenses)</p>
+            <p className="text-[10px] uppercase font-black text-neutral-400">Total Outflows (Debits / Cash Paid)</p>
             <p className="text-2xl font-black text-rose-600 mt-1">₹{totalDebit.toLocaleString()}</p>
           </div>
 
@@ -317,7 +361,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="bg-white p-4 rounded-xl border border-neutral-200 shadow-sm space-y-3 font-mono text-xs">
+        <div className="bg-white p-4 rounded-xl border border-neutral-200 shadow-sm space-y-3 font-mono text-xs print:hidden">
           <div className="flex flex-col md:flex-row items-center justify-between gap-3">
             <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
               {(["ALL", "CLIENT", "STAFF", "VENDOR", "GENERAL"] as const).map((m) => (
@@ -373,6 +417,22 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
             </div>
 
             <div className="flex items-center gap-2">
+              <span className="font-bold text-neutral-500 uppercase text-[10px]">Category:</span>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="border border-neutral-300 p-1.5 rounded bg-neutral-50 font-bold max-w-[200px] truncate"
+              >
+                <option value="ALL">All Categories ({availableCategories.length})</option>
+                {availableCategories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
               <span className="font-bold text-neutral-500 uppercase text-[10px]">From:</span>
               <input
                 type="date"
@@ -398,12 +458,13 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
               />
             </div>
 
-            {(startDate || endDate || selectedMonth !== "ALL" || searchQuery || selectedModule !== "ALL") && (
+            {(startDate || endDate || selectedMonth !== "ALL" || searchQuery || selectedModule !== "ALL" || selectedCategory !== "ALL") && (
               <button
                 onClick={() => {
                   setStartDate("");
                   setEndDate("");
                   setSelectedMonth("ALL");
+                  setSelectedCategory("ALL");
                   setSearchQuery("");
                   setSelectedModule("ALL");
                 }}
@@ -429,7 +490,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
                   <th className="p-3.5 text-right">Credit (+)</th>
                   <th className="p-3.5">Mode</th>
                   <th className="p-3.5">Remarks</th>
-                  <th className="p-3.5 text-center">Action</th>
+                  <th className="p-3.5 text-center print:hidden">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100 font-medium">
@@ -454,7 +515,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
                       <td className="p-3.5 text-right font-black text-emerald-600 whitespace-nowrap">{item.credit > 0 ? `₹${item.credit.toLocaleString()}` : "—"}</td>
                       <td className="p-3.5 text-neutral-600 text-[11px]">{item.paymentMode}</td>
                       <td className="p-3.5 text-neutral-600 max-w-xs text-[11px] truncate">{item.remarks}</td>
-                      <td className="p-3.5 text-center">
+                      <td className="p-3.5 text-center print:hidden">
                         <button onClick={() => setInspectedItem(item)} className="px-2.5 py-1 bg-neutral-100 hover:bg-neutral-900 hover:text-white rounded font-bold text-[10px] transition">
                           Inspect
                         </button>

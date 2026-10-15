@@ -26,6 +26,13 @@ import type {
 } from "../../../types/accounting";
 import { recordAuditLog } from "../../../lib/accountingAudit";
 
+// Helper to strip undefined values so Firestore doesn't crash on addDoc
+function cleanFirestoreData(data: Record<string, any>) {
+  return Object.fromEntries(
+    Object.entries(data).filter(([_, v]) => v !== undefined)
+  );
+}
+
 export default function VendorAccountingPage(): React.ReactElement {
   const { user, role, isSuperAdmin, loading } = useAuth();
   const router = useRouter();
@@ -495,19 +502,28 @@ export default function VendorAccountingPage(): React.ReactElement {
     }
 
     try {
-      const txnData: Omit<VendorTransaction, "id"> = {
+      // 🌟 NEW CODE: Save vendorName directly on the transaction
+      const txnData: any = {
         vendorId: selectedVendor.id,
+        vendorName: selectedVendor.vendorName, // <--- SAVES VENDOR NAME
         type: payTxnType,
         amount: parsedAmount,
         date: payDate,
         paymentDetails,
-        remarks: payRemarks.trim(),
         createdAt: new Date().toISOString(),
-        createdByUid: user?.uid || "",
-        createdByEmail: user?.email || "Unknown",
+        createdByUid: user.uid,
+        createdByEmail: user.email || "Unknown",
       };
 
-      await addDoc(collection(db, "accounting_vendor_transactions"), txnData);
+      if (payRemarks.trim()) {
+        txnData.remarks = payRemarks.trim();
+      }
+
+      // 🌟 Pass through cleanFirestoreData to strip out any undefined fields (like fromAccount)
+      await addDoc(
+        collection(db, "accounting_vendor_transactions"), 
+        cleanFirestoreData(txnData)
+      );
 
       const updatedBalance = selectedVendor.currentBalance - parsedAmount;
       const updatedTotalPaid = selectedVendor.totalPaid + parsedAmount;

@@ -121,6 +121,13 @@ export default function ComponentsPage() {
   // 7. Media
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [existingImages, setExistingImages] = useState<string[]>([]);
+  // NEW: State for Full-Screen Image Lightbox
+  const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
+
+  // NEW: Helper to remove an existing image
+  const handleRemoveExistingImage = (idxToRemove: number) => {
+    setExistingImages((prev) => prev.filter((_, idx) => idx !== idxToRemove));
+  };
   const [audioFile, setAudioFile] = useState<File | Blob | null>(null);
   const [existingAudioUrl, setExistingAudioUrl] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -979,10 +986,30 @@ export default function ComponentsPage() {
                 </div>
 
                 {/* 2. Photos */}
-                <div className="space-y-2 bg-slate-50 p-4 rounded-xl border-2 border-slate-300">
+                <div className="space-y-3 bg-slate-50 p-4 rounded-xl border-2 border-slate-300">
                   <label className="block text-sm font-black text-gray-900">
-                    📸 Component Reference Photos (Select multiple)
+                    📸 Component Reference Photos
                   </label>
+                  
+                  {/* Show Existing Images with Remove Button */}
+                  {existingImages.length > 0 && (
+                    <div className="flex flex-wrap gap-3 mb-2">
+                      {existingImages.map((imgUrl, idx) => (
+                        <div key={idx} className="relative w-24 h-24 border-2 border-gray-300 rounded-lg overflow-hidden group shadow-sm">
+                          <img src={imgUrl} alt="Saved" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExistingImage(idx)}
+                            className="absolute top-1 right-1 bg-red-600 text-white rounded-md w-6 h-6 flex items-center justify-center text-xs font-black shadow opacity-0 group-hover:opacity-100 transition"
+                            title="Remove Image"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <input
                     type="file"
                     multiple
@@ -992,6 +1019,11 @@ export default function ComponentsPage() {
                     }}
                     className="block w-full text-sm border-2 border-dashed border-gray-400 rounded-lg p-2 bg-white cursor-pointer"
                   />
+                  {imageFiles.length > 0 && (
+                    <p className="text-xs text-blue-700 font-bold mt-1">
+                      + {imageFiles.length} new file(s) selected to upload.
+                    </p>
+                  )}
                 </div>
 
                 {/* 3. ASSIGN WAREHOUSE PROPS */}
@@ -1412,15 +1444,26 @@ export default function ComponentsPage() {
 
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
                 <div className="flex flex-col md:flex-row gap-6">
-                  {/* Left: Image */}
-                  <div className="md:w-1/2">
-                    <div className="w-full h-64 bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300">
-                      {viewComponentData.images?.[0] ? (
-                        <img src={viewComponentData.images[0]} alt={viewComponentData.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-xs font-bold text-gray-400">No Photo</div>
-                      )}
-                    </div>
+                  {/* Left: Images Grid (Click to expand) */}
+                  <div className="md:w-1/2 space-y-3">
+                    {viewComponentData.images?.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {viewComponentData.images.map((imgUrl: string, idx: number) => (
+                          <div 
+                            key={idx} 
+                            onClick={() => setLightboxImageUrl(imgUrl)}
+                            className={`bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300 cursor-zoom-in hover:opacity-90 transition ${idx === 0 ? "col-span-2 h-64" : "h-32"}`}
+                            title="Click to view full screen"
+                          >
+                            <img src={imgUrl} alt={`${viewComponentData.name} - ${idx}`} className="w-full h-full object-cover" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="w-full h-64 bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300 flex items-center justify-center text-xs font-bold text-gray-400">
+                        No Photo
+                      </div>
+                    )}
                   </div>
 
                   {/* Right: Specifications */}
@@ -1468,6 +1511,76 @@ export default function ComponentsPage() {
                     <p className="text-xs text-gray-500 italic">No warehouse props assigned.</p>
                   )}
                 </div>
+
+                {/* Natural Flowers List */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-sm uppercase text-pink-900 border-b pb-1">🌸 Natural Flowers</h4>
+                  {viewComponentData.naturalFlowers?.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {viewComponentData.naturalFlowers.map((fl: any, idx: number) => (
+                        <div key={idx} className="bg-pink-50 border border-pink-200 p-3 rounded-lg text-xs shadow-sm">
+                          <p className="font-black text-pink-950">{fl.quantity} {fl.unit} of {fl.flowerName}</p>
+                          {fl.notes && <p className="text-pink-800 italic mt-0.5">Note: {fl.notes}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic">No natural flowers assigned.</p>
+                  )}
+                </div>
+
+                {/* Fresh Consumables List */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-sm uppercase text-green-900 border-b pb-1">📦 General Consumables</h4>
+                  {viewComponentData.freshPurchases?.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {viewComponentData.freshPurchases.map((fp: any, idx: number) => (
+                        <div key={idx} className="bg-green-50 border border-green-200 p-3 rounded-lg text-xs shadow-sm">
+                          <p className="font-black text-green-950">{fp.item} ({fp.qtyDescription})</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic">No fresh consumables assigned.</p>
+                  )}
+                </div>
+
+                {/* Vendor Rentals List */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-sm uppercase text-indigo-900 border-b pb-1">🚚 Vendor Rentals</h4>
+                  {viewComponentData.vendorRentals?.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {viewComponentData.vendorRentals.map((vr: any, idx: number) => (
+                        <div key={idx} className="bg-indigo-50 border border-indigo-200 p-3 rounded-lg text-xs shadow-sm">
+                          <p className="font-black text-indigo-950">{vr.quantity}x {vr.item} {vr.size && `(${vr.size})`}</p>
+                          {vr.vendorDetails && <p className="text-indigo-800 italic mt-0.5">Vendor: {vr.vendorDetails}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic">No vendor rentals assigned.</p>
+                  )}
+                </div>
+
+                {/* FULL SCREEN LIGHTBOX MODAL */}
+        {lightboxImageUrl && (
+          <div
+            onClick={() => setLightboxImageUrl(null)}
+            className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4 cursor-zoom-out"
+          >
+            <button
+              onClick={() => setLightboxImageUrl(null)}
+              className="absolute top-4 right-4 bg-white/20 hover:bg-red-600 text-white font-black px-4 py-2 rounded-full text-xs transition"
+            >
+              ✕ Close
+            </button>
+            <img 
+              src={lightboxImageUrl} 
+              alt="Fullscreen View" 
+              className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl border border-gray-700 bg-black" 
+            />
+          </div>
+        )}
 
                 {/* Assembly Steps */}
                 {viewComponentData.steps?.length > 0 && (

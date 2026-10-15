@@ -435,22 +435,73 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   };
 
-  // Submit 4: Settle & Close Float
+  // Submit 4: Mathematically Correct Settlement & Reconciliation
   const handleSettleFloat = async () => {
     if (!user || !selectedFloat) return;
-    if (
-      !window.confirm(
-        `Close and settle Float Account for ${selectedFloat.staffName}? Remaining balance: ₹${selectedFloat.currentFloatBalance}`
-      )
-    ) {
-      return;
+
+    const totalDisbursed = selectedFloat.initialDisbursedAmount + (selectedFloat.totalTopUpAmount || 0);
+    const totalSpent = selectedFloat.totalSpentAmount || 0;
+    const difference = totalDisbursed - totalSpent; 
+    // Positive = Surplus money left with staff to return
+    // Negative = Deficit / Out-of-pocket spend by staff to reimburse
+
+    let confirmationMsg = `Settle Float Account for ${selectedFloat.staffName}?\n`;
+    confirmationMsg += `Total Disbursed: ₹${totalDisbursed}\n`;
+    confirmationMsg += `Total Spent: ₹${totalSpent}\n`;
+
+    if (difference > 0) {
+      confirmationMsg += `\n💡 SURPLUS: Staff holds unspent ₹${difference}. This will be REVERSED back to the company account.`;
+    } else if (difference < 0) {
+      confirmationMsg += `\n💡 DEFICIT: Staff spent ₹{Math.abs(difference)} extra out-of-pocket. This will be REIMBURSED to the staff.`;
+    } else {
+      confirmationMsg += `\n💡 BALANCED: Zero variance.`;
     }
 
+    if (!window.confirm(confirmationMsg)) return;
+
     try {
+      let updatedTopUps = selectedFloat.totalTopUpAmount || 0;
+      let auditNotes = `Settled float with balanced zero variance.`;
+
+      if (difference < 0) {
+        // Staff spent MORE: Automatically disburse the deficit as an adjustment top-up
+        const extraDeficit = Math.abs(difference);
+        updatedTopUps += extraDeficit;
+
+        await addDoc(collection(db, "accounting_general_topups"), {
+          floatId: selectedFloat.id,
+          amount: extraDeficit,
+          date: new Date().toISOString().split("T")[0],
+          paymentDetails: { mode: "Bank Transfer - IMPS/RTGS", cashDescription: "Automatic Settlement Deficit Reimbursement" },
+          remarks: "Auto-reimbursement for out-of-pocket staff overspend during settlement",
+          createdAt: new Date().toISOString(),
+          createdByUid: user.uid,
+          createdByEmail: user.email,
+        });
+
+        auditNotes = `Settled float. Automatically reimbursed out-of-pocket deficit of ₹${extraDeficit} to staff. Balance brought to 0.`;
+      } else if (difference > 0) {
+        // Staff has SURPLUS: Record surplus reversal transaction
+        await addDoc(collection(db, "accounting_general_topups"), {
+          floatId: selectedFloat.id,
+          amount: -difference, // negative top-up representing cash return
+          date: new Date().toISOString().split("T")[0],
+          paymentDetails: { mode: "Cash", cashDescription: "Automatic Settlement Cash Surplus Reversal" },
+          remarks: "Cash surplus returned to company treasury upon float settlement",
+          createdAt: new Date().toISOString(),
+          createdByUid: user.uid,
+          createdByEmail: user.email,
+        });
+
+        auditNotes = `Settled float. Automatically reversed unspent surplus of ₹${difference} back to company treasury. Balance brought to 0.`;
+      }
+
       const updatePayload = {
         status: "SETTLED" as const,
+        totalTopUpAmount: updatedTopUps,
+        currentFloatBalance: 0, // Brought strictly to zero
         settledAt: new Date().toISOString(),
-        settledByUid: user?.uid || "",
+        settledByUid: user.uid,
         updatedAt: new Date().toISOString(),
       };
 
@@ -463,11 +514,11 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         targetName: selectedFloat.staffName,
         previousData: { status: "ACTIVE", balance: selectedFloat.currentFloatBalance },
         newData: updatePayload,
-        notes: `Settled and closed float with ending balance of ₹${selectedFloat.currentFloatBalance}`,
+        notes: auditNotes,
       });
 
       await loadInitialData();
-      alert("✅ Float Account has been reconciled and settled.");
+      alert("✅ Float Account has been mathematically reconciled, adjusted, and settled.");
     } catch (err: any) {
       console.error(err);
       alert("Settlement failed: " + err.message);
