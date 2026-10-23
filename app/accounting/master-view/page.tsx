@@ -209,20 +209,39 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
       });
     });
 
-    // 5. General Float Expenses (Actual spend deducted here)
-    floatExpenses.forEach((e) => {
+    // 🌟 5. General Float Expenses (Smart Categorization into VENDOR, STAFF, or GENERAL)
+    floatExpenses.forEach((e: any) => {
       const parentFloat = floats.find((f) => f.id === e.floatId);
       const totalDisbursed = parentFloat ? parentFloat.initialDisbursedAmount + (parentFloat.totalTopUpAmount || 0) : 0;
+
+      // Determine correct module and beneficiary party
+      let itemModule: "STAFF" | "VENDOR" | "GENERAL" = "GENERAL";
+      let partyName = `${parentFloat?.staffName || "Staff"} (Float Expense)`;
+      let category = `EXPENSE (${e.purchaseType})`;
+
+      if (e.vendorId) {
+        // This float spend was a vendor payment!
+        itemModule = "VENDOR";
+        const matchedVendor = vendorsList.find((v) => v.id === e.vendorId);
+        partyName = matchedVendor?.vendorName || "Vendor Payout";
+        category = "VENDOR PAYMENT (FROM FLOAT)";
+      } else if (e.targetStaffUid) {
+        // This float spend was a staff salary/advance payout!
+        itemModule = "STAFF";
+        partyName = usersMap[e.targetStaffUid] || "Staff Member";
+        category = "STAFF ADVANCE (FROM FLOAT)";
+      }
+
       list.push({
         id: e.id,
         date: e.date || e.createdAt?.split("T")[0],
-        module: "GENERAL",
-        category: `EXPENSE (${e.purchaseType})`,
-        partyName: `${parentFloat?.staffName || "Staff"} (Float Expense)`,
+        module: itemModule, // 👈 Dynamically routes to VENDOR, STAFF, or GENERAL
+        category: category,
+        partyName: partyName, // 👈 Shows Vendor Name or Staff Name!
         debit: e.amount,
         credit: 0,
         paymentMode: "Petty Float Spend",
-        accountOrUpi: "Staff Float Balance",
+        accountOrUpi: `Disbursed by ${parentFloat?.staffName || "Staff"}`,
         remarks: `${e.purchaseDetails} (from ₹${totalDisbursed.toLocaleString()} Disbursed Float)`,
         raw: e,
       });
