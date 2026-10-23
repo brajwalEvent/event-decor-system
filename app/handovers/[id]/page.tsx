@@ -907,6 +907,15 @@ export default function HandoverWorkspace() {
             >
               🌸 Flower Sheet
             </button>
+
+            {/* 👥 GUEST RSVP & ID DESK BUTTON */}
+            <button
+              onClick={() => router.push(`/handovers/${handoverId}/rsvp`)}
+              className="bg-purple-700 hover:bg-purple-800 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+            >
+              👥 RSVP & Guest IDs
+            </button>
+
             <button
               onClick={() => router.push(`/handovers/${handoverId}/entertainment-sheet`)}
               className="bg-purple-800 hover:bg-purple-900 text-white font-black px-3 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
