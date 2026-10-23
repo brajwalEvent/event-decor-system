@@ -10,7 +10,8 @@ export async function GET() {
 // Handle incoming WhatsApp messages and photos from Twilio (POST)
 export async function POST(req: Request) {
   try {
-    console.log("=== INBOUND TWILIO WHATSAPP POST TRIGGERED ===");
+    console.log("==================================================");
+    console.log("🚨 INBOUND TWILIO WHATSAPP POST TRIGGERED! 🚨");
 
     const textData = await req.text();
     const params = new URLSearchParams(textData);
@@ -19,38 +20,47 @@ export async function POST(req: Request) {
     const body = params.get("Body") || "";
     const numMedia = parseInt(params.get("NumMedia") || "0", 10);
 
-    console.log(`📱 From: ${from} | Media: ${numMedia} | Body: ${body}`);
-
     const cleanSenderPhone = from.replace("whatsapp:", "").replace(/[^0-9]/g, "");
 
+    console.log(`🔥 LIVE TEST - INCOMING WHATSAPP FROM: ${cleanSenderPhone}`);
+    console.log(`🔥 MESSAGE BODY: ${body}`);
+    console.log(`📸 MEDIA COUNT: ${numMedia}`);
+
     if (!cleanSenderPhone) {
+      console.log("❌ ERROR: Could not extract sender phone number.");
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
+    // Extract incoming image URLs from Twilio
     const incomingMediaUrls: string[] = [];
     for (let i = 0; i < numMedia; i++) {
       const mediaUrl = params.get(`MediaUrl${i}`);
       if (mediaUrl) incomingMediaUrls.push(mediaUrl);
     }
+    console.log("📸 Extracted Media URLs:", incomingMediaUrls);
 
-    // Match guest in Firestore
+    // Fetch all guests to print them in Vercel logs for debugging
     const rsvpGroupSnap = await getDocs(collectionGroup(db, "rsvps"));
+    console.log(`🔥 Total guests found in database collection group: ${rsvpGroupSnap.size}`);
+
     let matchedGuestDoc: any = null;
 
     rsvpGroupSnap.forEach((d) => {
-      const guestData = d.data();
-      const guestPhoneClean = (guestData.phone || "").replace(/[^0-9]/g, "");
+      const data = d.data();
+      const guestPhoneClean = (data.phone || "").replace(/[^0-9]/g, "");
+      console.log(`Checking DB Guest: ${data.name} | Phone in DB: ${data.phone} (Clean: ${guestPhoneClean})`);
+      
       if (guestPhoneClean.slice(-10) === cleanSenderPhone.slice(-10)) {
         matchedGuestDoc = d;
+        console.log(`🎉 MATCH SUCCESSFUL FOR GUEST: ${data.name} (Doc Path: ${d.ref.path})`);
       }
     });
 
     if (matchedGuestDoc) {
-      console.log(`✅ Matched Guest: ${matchedGuestDoc.data().name}`);
       const currentIds = matchedGuestDoc.data().idCardUrls || [];
       const updatedIds = [...currentIds, ...incomingMediaUrls];
 
-      // Save to chat
+      // 1. Save message to chat history
       await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
         direction: "inbound",
         body: body.trim(),
@@ -58,8 +68,9 @@ export async function POST(req: Request) {
         timestamp: new Date().toISOString(),
         senderName: matchedGuestDoc.data().name || "Guest",
       });
+      console.log("✅ Message saved to guest chat collection.");
 
-      // Update profile
+      // 2. Update guest profile
       await updateDoc(doc(db, matchedGuestDoc.ref.path), {
         idCardUrls: updatedIds,
         lastMessage: body.trim() || (numMedia > 0 ? `📷 Sent ${numMedia} photo(s)` : "Replied on WhatsApp"),
@@ -67,20 +78,28 @@ export async function POST(req: Request) {
         hasUnreadMessages: true,
         ...(numMedia > 0 ? { status: "IDs Received" } : {}),
       });
+      console.log("✅ Guest document successfully updated with IDs/status.");
 
       const replyText = numMedia > 0
         ? `Namaste! We have received ${numMedia} ID card photo(s) for your family. Thank you! 🙏`
-        : `Namaste! We received your message. Please share photos of ID cards for all family members attending.`;
+        : `Namaste! We received your message. Please share photos of the ID cards for all family members attending.`;
 
-      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
+      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>${replyText}</Message>
+</Response>`;
+
+      console.log("✅ Sending TwiML Auto-Reply back to Twilio.");
+      console.log("==================================================");
       return new Response(twimlResponse, { headers: { "Content-Type": "text/xml" } });
     }
 
-    console.log("❌ No guest found matching phone:", cleanSenderPhone);
+    console.log(`❌ ERROR: No guest found matching phone number ending in ${cleanSenderPhone.slice(-10)}`);
+    console.log("==================================================");
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
 
   } catch (err) {
-    console.error("❌ WEBHOOK ERROR:", err);
+    console.error("❌ CRITICAL WEBHOOK ERROR:", err);
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   }
 }
