@@ -3,36 +3,50 @@ import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc } from "fi
 
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
-    const from = formData.get("From") as string;
-    const body = (formData.get("Body") as string) || "";
-    const numMedia = parseInt((formData.get("NumMedia") as string) || "0", 10);
+    console.log("=== INBOUND TWILIO WEBHOOK TRIGGERED ===");
 
-    const cleanSenderPhone = from ? from.replace("whatsapp:", "").replace(/[^0-9]/g, "") : "";
+    // Twilio sends data as urlencoded string. This is the safest way to parse it in Next.js:
+    const textData = await req.text();
+    const params = new URLSearchParams(textData);
+
+    const from = params.get("From") || "";
+    const body = params.get("Body") || "";
+    const numMedia = parseInt(params.get("NumMedia") || "0", 10);
+
+    console.log(`Received from: ${from} | Media Count: ${numMedia} | Body: ${body}`);
+
+    // Extract clean phone number without "whatsapp:" prefix
+    const cleanSenderPhone = from.replace("whatsapp:", "").replace(/[^0-9]/g, "");
+
     if (!cleanSenderPhone) {
+      console.log("Error: No valid sender phone found.");
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // Extract incoming images if any
+    // Extract incoming image URLs from Twilio
     const incomingMediaUrls: string[] = [];
     for (let i = 0; i < numMedia; i++) {
-      const mediaUrl = formData.get(`MediaUrl${i}`) as string;
+      const mediaUrl = params.get(`MediaUrl${i}`);
       if (mediaUrl) incomingMediaUrls.push(mediaUrl);
     }
 
-    // Match guest by phone number
+    console.log("Extracted Media URLs:", incomingMediaUrls);
+
+    // Match guest in Firestore across RSVPs by phone number
     const rsvpGroupSnap = await getDocs(collectionGroup(db, "rsvps"));
     let matchedGuestDoc: any = null;
 
     rsvpGroupSnap.forEach((d) => {
       const data = d.data();
       const guestPhoneClean = (data.phone || "").replace(/[^0-9]/g, "");
+      // Match last 10 digits to handle country code differences gracefully
       if (guestPhoneClean.slice(-10) === cleanSenderPhone.slice(-10)) {
         matchedGuestDoc = d;
       }
     });
 
     if (matchedGuestDoc) {
+      console.log(`Matched Guest ID: ${matchedGuestDoc.id}`);
       const currentIds = matchedGuestDoc.data().idCardUrls || [];
       const updatedIds = [...currentIds, ...incomingMediaUrls];
 
@@ -54,16 +68,22 @@ export async function POST(req: Request) {
         ...(numMedia > 0 ? { status: "IDs Received" } : {}),
       });
 
-      // Only send automated receipt if media was attached
-      if (numMedia > 0) {
-        const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+      console.log("Successfully updated guest doc with new messages/media.");
+
+      // Send auto-reply back to the guest
+      const replyText = numMedia > 0
+        ? `Namaste! We have received ${numMedia} ID card photo(s) for your family. Thank you! 🙏`
+        : `Namaste! We received your message. Please share photos of the ID cards for all family members attending. Thank you!`;
+
+      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Message>Namaste! We have received ${numMedia} ID card photo(s) for your family. Thank you! 🙏</Message>
+    <Message>${replyText}</Message>
 </Response>`;
-        return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
-      }
+
+      return new Response(twimlResponse, { headers: { "Content-Type": "text/xml" } });
     }
 
+    console.log("No matching guest found in the database for phone:", cleanSenderPhone);
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   } catch (err) {
     console.error("Webhook processing error:", err);
