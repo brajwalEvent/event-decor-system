@@ -36,6 +36,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   const [selectedFloat, setSelectedFloat] = useState<GeneralStaffFloat | null>(null);
   const [expenses, setExpenses] = useState<GeneralFloatExpense[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
+  const [vendorsList, setVendorsList] = useState<any[]>([]);
   const [crmWeddings, setCrmWeddings] = useState<any[]>([]);
   const [expenseTypes, setExpenseTypes] = useState<string[]>([
     "Resort / Hotel Stay",
@@ -54,6 +55,24 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   const [showOpenFloatModal, setShowOpenFloatModal] = useState(false);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+
+  // 🌟 Add these 2 new modal triggers:
+  const [showFloatVendorPayModal, setShowFloatVendorPayModal] = useState(false);
+  const [showFloatStaffPayModal, setShowFloatStaffPayModal] = useState(false);
+
+  // States for Float Vendor Payment
+  const [selectedVendorForFloatPay, setSelectedVendorForFloatPay] = useState<any | null>(null);
+  const [floatVendorPayAmount, setFloatVendorPayAmount] = useState<number | "">("");
+  const [floatVendorPayMode, setFloatVendorPayMode] = useState<PaymentMode>("Cash");
+  const [floatVendorPayTxnType, setFloatVendorPayTxnType] = useState<"PAYMENT" | "ADVANCE">("PAYMENT");
+  const [floatVendorPayRemarks, setFloatVendorPayRemarks] = useState("");
+
+  // States for Float Staff Salary Payment
+  const [selectedStaffForFloatPay, setSelectedStaffForFloatPay] = useState<string>("");
+  const [floatStaffPayAmount, setFloatStaffPayAmount] = useState<number | "">("");
+  const [floatStaffPayMode, setFloatStaffPayMode] = useState<PaymentMode>("Cash");
+  const [floatStaffPayTxnType, setFloatStaffPayTxnType] = useState<"SALARY_CREDIT" | "ADVANCE_PAYMENT">("ADVANCE_PAYMENT");
+  const [floatStaffPayRemarks, setFloatStaffPayRemarks] = useState("");
 
   // Form: Open Float Account
   const [disburseStaffUid, setDisburseStaffUid] = useState("");
@@ -120,6 +139,9 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
 
       const userSnap = await getDocs(collection(db, "users"));
       setStaffList(userSnap.docs.map((d) => ({ uid: d.id, ...d.data() })));
+      // 🌟 Fetch Vendors for on-ground vendor payouts from float
+      const vendorSnap = await getDocs(collection(db, "accounting_vendors")).catch(() => ({ docs: [] }));
+      setVendorsList(vendorSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
       const leadsSnap = await getDocs(collection(db, "leads")).catch(() => ({ docs: [] }));
       const bookedWeddings = leadsSnap.docs
@@ -213,6 +235,137 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
 
     return details;
   };
+
+   // 🌟 Handler: Record Vendor Payment from Float
+  const handleRecordVendorPayFromFloat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !selectedFloat || !selectedVendorForFloatPay || !floatVendorPayAmount) return;
+
+    const parsedAmount = Number(floatVendorPayAmount);
+
+    try {
+      // 1. Log expense in Float Ledger (Deducts from Float)
+      const expenseData = {
+        floatId: selectedFloat.id,
+        staffUid: selectedFloat.staffUid,
+        purchaseType: `Vendor Payout (${selectedVendorForFloatPay.vendorName})`,
+        amount: parsedAmount,
+        date: new Date().toISOString().split("T")[0],
+        purchaseDetails: `Vendor payment disbursed on-site to ${selectedVendorForFloatPay.vendorName}. Remarks: ${floatVendorPayRemarks || "None"}`,
+        paidFromFloat: true,
+        vendorId: selectedVendorForFloatPay.id,
+        createdAt: new Date().toISOString(),
+        createdByUid: user.uid,
+      };
+      await addDoc(collection(db, "accounting_general_expenses"), expenseData);
+
+      // Deduct from Float Balance
+      const updatedSpent = selectedFloat.totalSpentAmount + parsedAmount;
+      const updatedBalance = selectedFloat.currentFloatBalance - parsedAmount;
+      await updateDoc(doc(db, "accounting_general_floats", selectedFloat.id), {
+        totalSpentAmount: updatedSpent,
+        currentFloatBalance: updatedBalance,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 2. Log in Vendor's Ledger (Reduces Vendor Due)
+      const vendorTxnData = {
+        vendorId: selectedVendorForFloatPay.id,
+        vendorName: selectedVendorForFloatPay.vendorName,
+        type: floatVendorPayTxnType,
+        amount: parsedAmount,
+        date: new Date().toISOString().split("T")[0],
+        paymentDetails: { mode: floatVendorPayMode, cashDescription: `Paid on-ground from ${selectedFloat.staffName}'s float` },
+        paidFromFloat: true, // 🔑 Flag to prevent double deduction in master view
+        floatId: selectedFloat.id,
+        remarks: `Paid from ${selectedFloat.staffName}'s float: ${floatVendorPayRemarks}`,
+        createdAt: new Date().toISOString(),
+        createdByUid: user.uid,
+        createdByEmail: user.email || "Unknown",
+      };
+      await addDoc(collection(db, "accounting_vendor_transactions"), vendorTxnData);
+
+      // Update Vendor Balance
+      const updatedVendorBalance = selectedVendorForFloatPay.currentBalance - parsedAmount;
+      const updatedVendorPaid = selectedVendorForFloatPay.totalPaid + parsedAmount;
+      await updateDoc(doc(db, "accounting_vendors", selectedVendorForFloatPay.id), {
+        currentBalance: updatedVendorBalance,
+        totalPaid: updatedVendorPaid,
+        updatedAt: new Date().toISOString(),
+      });
+
+      setSelectedFloat({ ...selectedFloat, totalSpentAmount: updatedSpent, currentFloatBalance: updatedBalance });
+      setShowFloatVendorPayModal(false);
+      setFloatVendorPayAmount("");
+      setFloatVendorPayRemarks("");
+      fetchFloatExpenses(selectedFloat.id);
+      alert(`✅ ₹${parsedAmount} disbursed to ${selectedVendorForFloatPay.vendorName} and deducted from float.`);
+    } catch (err: any) {
+      alert("Failed: " + err.message);
+    }
+  };
+
+  // 🌟 Handler: Record Staff Salary/Advance Payment from Float
+  const handleRecordStaffPayFromFloat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !selectedFloat || !selectedStaffForFloatPay || !floatStaffPayAmount) return;
+
+    const parsedAmount = Number(floatStaffPayAmount);
+    const targetStaff = staffList.find((s) => s.uid === selectedStaffForFloatPay);
+    const targetStaffName = targetStaff?.displayName || targetStaff?.email || "Staff";
+
+    try {
+      // 1. Log expense in Float Ledger
+      const expenseData = {
+        floatId: selectedFloat.id,
+        staffUid: selectedFloat.staffUid,
+        purchaseType: `Staff Advance/Salary (${targetStaffName})`,
+        amount: parsedAmount,
+        date: new Date().toISOString().split("T")[0],
+        purchaseDetails: `Staff payment given to ${targetStaffName} from field float.`,
+        paidFromFloat: true,
+        targetStaffUid: selectedStaffForFloatPay,
+        createdAt: new Date().toISOString(),
+        createdByUid: user.uid,
+      };
+      await addDoc(collection(db, "accounting_general_expenses"), expenseData);
+
+      // Deduct from Float Balance
+      const updatedSpent = selectedFloat.totalSpentAmount + parsedAmount;
+      const updatedBalance = selectedFloat.currentFloatBalance - parsedAmount;
+      await updateDoc(doc(db, "accounting_general_floats", selectedFloat.id), {
+        totalSpentAmount: updatedSpent,
+        currentFloatBalance: updatedBalance,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 2. Log in Staff's Salary Account
+      const staffTxnData = {
+        staffUid: selectedStaffForFloatPay,
+        type: floatStaffPayTxnType,
+        amount: parsedAmount,
+        date: new Date().toISOString().split("T")[0],
+        paymentDetails: { mode: floatStaffPayMode, cashDescription: `Given on-ground from ${selectedFloat.staffName}'s float` },
+        paidFromFloat: true, // 🔑 Flag to prevent double deduction in master view
+        floatId: selectedFloat.id,
+        remarks: `Disbursed by ${selectedFloat.staffName} from float: ${floatStaffPayRemarks}`,
+        createdAt: new Date().toISOString(),
+        createdByUid: user.uid,
+        createdByEmail: user.email || "Unknown",
+      };
+      await addDoc(collection(db, "accounting_staff_transactions"), staffTxnData);
+
+      setSelectedFloat({ ...selectedFloat, totalSpentAmount: updatedSpent, currentFloatBalance: updatedBalance });
+      setShowFloatStaffPayModal(false);
+      setFloatStaffPayAmount("");
+      setFloatStaffPayRemarks("");
+      fetchFloatExpenses(selectedFloat.id);
+      alert(`✅ ₹${parsedAmount} given to ${targetStaffName} and deducted from float.`);
+    } catch (err: any) {
+      alert("Failed: " + err.message);
+    }
+  };
+
 
   // Submit 1: Open Temporary Staff Float
   const handleOpenFloat = async (e: React.FormEvent) => {
@@ -766,14 +919,29 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
                       </p>
                     </div>
 
-                    {selectedFloat.status === "ACTIVE" && (
-                      <button
-                        onClick={() => setShowAddExpenseModal(true)}
-                        className="px-4 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
-                      >
-                        + Log Expense
-                      </button>
-                    )}
+                    {/* 🌟 REPLACE WITH THESE 3 BUTTONS: */}
+{selectedFloat.status === "ACTIVE" && (
+  <div className="flex flex-wrap items-center gap-2">
+    <button
+      onClick={() => setShowAddExpenseModal(true)}
+      className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
+    >
+      + 1. Log General Expense
+    </button>
+    <button
+      onClick={() => setShowFloatVendorPayModal(true)}
+      className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-blue-700 text-white hover:bg-blue-800 transition"
+    >
+      + 2. Pay Vendor from Float
+    </button>
+    <button
+      onClick={() => setShowFloatStaffPayModal(true)}
+      className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-purple-700 text-white hover:bg-purple-800 transition"
+    >
+      + 3. Pay Staff Salary from Float
+    </button>
+  </div>
+)}
                   </div>
 
                   <div className="overflow-x-auto">
@@ -1293,6 +1461,161 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
           </div>
         </div>
       )}
+
+     {/* 🌟 MODAL: PAY VENDOR FROM FLOAT */}
+      {showFloatVendorPayModal && selectedFloat && (
+        <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-xs">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 border shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h2 className="text-base font-black uppercase text-blue-950">Pay Vendor From {selectedFloat.staffName}&apos;s Float</h2>
+              <button onClick={() => setShowFloatVendorPayModal(false)} className="font-black">✕</button>
+            </div>
+            <form onSubmit={handleRecordVendorPayFromFloat} className="space-y-4">
+              <div>
+                <label className="block font-black mb-1 uppercase">Choose Vendor *</label>
+                <select
+                  required
+                  onChange={(e) => setSelectedVendorForFloatPay(vendorsList.find((v) => v.id === e.target.value) || null)}
+                  className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                >
+                  <option value="">-- Choose Vendor --</option>
+                  {vendorsList.map((v) => (
+                    <option key={v.id} value={v.id}>{v.vendorName} ({v.category}) — Due: ₹{v.currentBalance || 0}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black mb-1 uppercase">Amount to Disburse (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    placeholder="e.g. 5000"
+                    value={floatVendorPayAmount}
+                    onChange={(e) => setFloatVendorPayAmount(Number(e.target.value))}
+                    className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-black mb-1 uppercase">Type *</label>
+                  <select
+                    value={floatVendorPayTxnType}
+                    onChange={(e) => setFloatVendorPayTxnType(e.target.value as any)}
+                    className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                  >
+                    <option value="PAYMENT">Standard Payment</option>
+                    <option value="ADVANCE">Advance Payout</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block font-black mb-1 uppercase">Mode *</label>
+                <select
+                  value={floatVendorPayMode}
+                  onChange={(e) => setFloatVendorPayMode(e.target.value as PaymentMode)}
+                  className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Bank Transfer - IMPS/RTGS">Bank Transfer</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-black mb-1 uppercase">Remarks</label>
+                <input
+                  placeholder="e.g. Stage lighting deposit handed over on site..."
+                  value={floatVendorPayRemarks}
+                  onChange={(e) => setFloatVendorPayRemarks(e.target.value)}
+                  className="w-full border p-2 rounded bg-neutral-50"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setShowFloatVendorPayModal(false)} className="px-4 py-2 border font-bold rounded uppercase">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-700 text-white font-black rounded uppercase hover:bg-blue-800">Deduct & Disburse to Vendor</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 MODAL: PAY STAFF SALARY/ADVANCE FROM FLOAT */}
+      {showFloatStaffPayModal && selectedFloat && (
+        <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-xs">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 border shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h2 className="text-base font-black uppercase text-purple-950">Pay Staff Salary From {selectedFloat.staffName}&apos;s Float</h2>
+              <button onClick={() => setShowFloatStaffPayModal(false)} className="font-black">✕</button>
+            </div>
+            <form onSubmit={handleRecordStaffPayFromFloat} className="space-y-4">
+              <div>
+                <label className="block font-black mb-1 uppercase">Choose Beneficiary Staff *</label>
+                <select
+                  required
+                  value={selectedStaffForFloatPay}
+                  onChange={(e) => setSelectedStaffForFloatPay(e.target.value)}
+                  className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                >
+                  <option value="">-- Choose Staff Member --</option>
+                  {staffList.map((s) => (
+                    <option key={s.uid} value={s.uid}>{s.displayName || s.email} ({s.role})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black mb-1 uppercase">Amount (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    placeholder="e.g. 3000"
+                    value={floatStaffPayAmount}
+                    onChange={(e) => setFloatStaffPayAmount(Number(e.target.value))}
+                    className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-black mb-1 uppercase">Type *</label>
+                  <select
+                    value={floatStaffPayTxnType}
+                    onChange={(e) => setFloatStaffPayTxnType(e.target.value as any)}
+                    className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                  >
+                    <option value="ADVANCE_PAYMENT">Advance Given</option>
+                    <option value="SALARY_CREDIT">Salary Payment</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block font-black mb-1 uppercase">Mode *</label>
+                <select
+                  value={floatStaffPayMode}
+                  onChange={(e) => setFloatStaffPayMode(e.target.value as PaymentMode)}
+                  className="w-full border p-2 rounded bg-neutral-50 font-bold"
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-black mb-1 uppercase">Remarks</label>
+                <input
+                  placeholder="e.g. Event travel food advance given in cash..."
+                  value={floatStaffPayRemarks}
+                  onChange={(e) => setFloatStaffPayRemarks(e.target.value)}
+                  className="w-full border p-2 rounded bg-neutral-50"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setShowFloatStaffPayModal(false)} className="px-4 py-2 border font-bold rounded uppercase">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-purple-700 text-white font-black rounded uppercase hover:bg-purple-800">Deduct & Pay Staff</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

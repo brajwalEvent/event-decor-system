@@ -146,7 +146,10 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
     });
 
     // 2. Staff Transactions
-    staffTxns.forEach((t) => {
+    staffTxns.forEach((t: any) => {
+      // 🌟 IF THIS WAS PAID ON-GROUND FROM A FLOAT, SKIP IT TO AVOID DOUBLE COUNTING
+      if (t.paidFromFloat) return;
+
       const staffName = usersMap[t.staffUid] || "Staff Member";
       list.push({
         id: t.id,
@@ -166,9 +169,11 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
     // NOTE: Vendor Purchases (Bills) are excluded from cash debit stream as they are unearned/unpaid liabilities. 
     // Only actual cash disbursements below reduce the company liquid balance.
 
-    // 🌟 VENDOR TRANSACTIONS IN MASTER VIEW:
+    // 4. Vendor Transactions (Disbursements)
     vendorTxns.forEach((t: any) => {
-      // It will now immediately read t.vendorName which we saved in Step 1!
+      // 🌟 IF THIS WAS PAID ON-GROUND FROM A FLOAT, SKIP IT TO AVOID DOUBLE COUNTING
+      if (t.paidFromFloat) return;
+
       const vendorName = t.vendorName || "Vendor Disbursement";
 
       list.push({
@@ -176,7 +181,7 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
         date: t.date || t.createdAt?.split("T")[0],
         module: "VENDOR",
         category: `VENDOR ${t.type}`,
-        partyName: vendorName, // 👈 Displays the actual vendor name!
+        partyName: vendorName,
         debit: t.amount,
         credit: 0,
         paymentMode: t.paymentDetails?.mode || "—",
