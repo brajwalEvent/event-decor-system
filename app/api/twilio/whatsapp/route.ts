@@ -1,11 +1,11 @@
 import { db } from "../../../../lib/firebase";
-import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc } from "firebase/firestore";
+import { collectionGroup, getDocs, updateDoc, doc, addDoc, collection } from "firebase/firestore";
 
 export async function POST(req: Request) {
   try {
-    console.log("=== INBOUND TWILIO WEBHOOK TRIGGERED ===");
+    console.log("==================================================");
+    console.log("🚨 INBOUND TWILIO WEBHOOK FIRED! 🚨");
 
-    // Twilio sends data as urlencoded string. This is the safest way to parse it in Next.js:
     const textData = await req.text();
     const params = new URLSearchParams(textData);
 
@@ -13,44 +13,45 @@ export async function POST(req: Request) {
     const body = params.get("Body") || "";
     const numMedia = parseInt(params.get("NumMedia") || "0", 10);
 
-    console.log(`Received from: ${from} | Media Count: ${numMedia} | Body: ${body}`);
+    console.log(`📱 Message From: ${from}`);
+    console.log(`💬 Text Body: ${body}`);
+    console.log(`📸 Media Count: ${numMedia}`);
 
-    // Extract clean phone number without "whatsapp:" prefix
     const cleanSenderPhone = from.replace("whatsapp:", "").replace(/[^0-9]/g, "");
-
+    
     if (!cleanSenderPhone) {
-      console.log("Error: No valid sender phone found.");
+      console.log("❌ ERROR: Could not extract phone number.");
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // Extract incoming image URLs from Twilio
+    console.log(`🔍 Searching Database for Phone ending in: ${cleanSenderPhone.slice(-10)}`);
+
     const incomingMediaUrls: string[] = [];
     for (let i = 0; i < numMedia; i++) {
       const mediaUrl = params.get(`MediaUrl${i}`);
       if (mediaUrl) incomingMediaUrls.push(mediaUrl);
     }
 
-    console.log("Extracted Media URLs:", incomingMediaUrls);
-
-    // Match guest in Firestore across RSVPs by phone number
+    // Search Database
     const rsvpGroupSnap = await getDocs(collectionGroup(db, "rsvps"));
     let matchedGuestDoc: any = null;
 
     rsvpGroupSnap.forEach((d) => {
-      const data = d.data();
-      const guestPhoneClean = (data.phone || "").replace(/[^0-9]/g, "");
-      // Match last 10 digits to handle country code differences gracefully
+      const guestData = d.data();
+      const guestPhoneClean = (guestData.phone || "").replace(/[^0-9]/g, "");
+      
+      // Look for a match on the last 10 digits
       if (guestPhoneClean.slice(-10) === cleanSenderPhone.slice(-10)) {
         matchedGuestDoc = d;
+        console.log(`✅ MATCH FOUND! Guest Name: ${guestData.name}`);
       }
     });
 
     if (matchedGuestDoc) {
-      console.log(`Matched Guest ID: ${matchedGuestDoc.id}`);
       const currentIds = matchedGuestDoc.data().idCardUrls || [];
       const updatedIds = [...currentIds, ...incomingMediaUrls];
 
-      // 1. Save message into guest's chat history
+      // Save Message to Chat History
       await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
         direction: "inbound",
         body: body.trim(),
@@ -58,8 +59,9 @@ export async function POST(req: Request) {
         timestamp: new Date().toISOString(),
         senderName: matchedGuestDoc.data().name || "Guest",
       });
+      console.log("✅ Message saved to chat history.");
 
-      // 2. Update guest document
+      // Update Guest Document
       await updateDoc(doc(db, matchedGuestDoc.ref.path), {
         idCardUrls: updatedIds,
         lastMessage: body.trim() || (numMedia > 0 ? `📷 Sent ${numMedia} photo(s)` : "Replied on WhatsApp"),
@@ -67,26 +69,24 @@ export async function POST(req: Request) {
         hasUnreadMessages: true,
         ...(numMedia > 0 ? { status: "IDs Received" } : {}),
       });
+      console.log("✅ Guest profile updated with photos/status.");
 
-      console.log("Successfully updated guest doc with new messages/media.");
-
-      // Send auto-reply back to the guest
       const replyText = numMedia > 0
         ? `Namaste! We have received ${numMedia} ID card photo(s) for your family. Thank you! 🙏`
-        : `Namaste! We received your message. Please share photos of the ID cards for all family members attending. Thank you!`;
+        : `Namaste! We received your message. Please share photos of the ID cards for all family members attending.`;
 
-      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>${replyText}</Message>
-</Response>`;
-
+      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
+      console.log("✅ Sending Auto-Reply back to guest.");
+      console.log("==================================================");
       return new Response(twimlResponse, { headers: { "Content-Type": "text/xml" } });
     }
 
-    console.log("No matching guest found in the database for phone:", cleanSenderPhone);
+    console.log("❌ ERROR: No matching guest found in the database for that phone number.");
+    console.log("==================================================");
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
+
   } catch (err) {
-    console.error("Webhook processing error:", err);
+    console.error("❌ CRITICAL WEBHOOK ERROR:", err);
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   }
 }
