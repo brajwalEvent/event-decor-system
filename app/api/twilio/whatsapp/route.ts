@@ -2,79 +2,73 @@ import { NextResponse } from "next/server";
 import { db, storage } from "../../../../lib/firebase";
 import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import twilio from "twilio";
 
-// Handshake verification for Meta & Twilio (GET)
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
-  if (mode && token) {
-    if (mode === "subscribe") {
-      return new Response(challenge, { status: 200 });
-    } else {
-      return new Response("Forbidden", { status: 403 });
-    }
+  if (mode === "subscribe" && token) {
+    return new Response(challenge, { status: 200 });
   }
   return NextResponse.json({ status: "Twilio WhatsApp Webhook is active" });
 }
 
-// Handle incoming WhatsApp messages and photos (POST)
 export async function POST(req: Request) {
   try {
-    console.log("==================================================");
-    console.log("🚨 INBOUND WHATSAPP POST TRIGGERED!");
-
     const textData = await req.text();
     const params = new URLSearchParams(textData);
 
     const from = params.get("From") || "";
     const body = params.get("Body") || "";
+    const messageSid = params.get("MessageSid") || "";
     const numMedia = parseInt(params.get("NumMedia") || "0", 10);
     const cleanSenderPhone = from.replace("whatsapp:", "").replace(/[^0-9]/g, "");
-
-    console.log(`🔥 FROM: ${cleanSenderPhone} | MEDIA: ${numMedia} | BODY: ${body}`);
 
     if (!cleanSenderPhone) {
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // 1. DOWNLOAD & UPLOAD MEDIA TO FIREBASE STORAGE
+    // 1. Download incoming attachments and upload to Firebase
     const finalizedMediaUrls: string[] = [];
-    
-    // Twilio Auth for downloading media
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const authHeader = 'Basic ' + Buffer.from(accountSid + ':' + authToken).toString('base64');
+    const authHeader = "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
 
     for (let i = 0; i < numMedia; i++) {
       const mediaUrl = params.get(`MediaUrl${i}`);
       const contentType = params.get(`MediaContentType${i}`) || "image/jpeg";
-      
+
       if (mediaUrl) {
         try {
           const response = await fetch(mediaUrl, {
-            headers: { 'Authorization': authHeader }
+            headers: { Authorization: authHeader },
           });
           const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
 
-          const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.jpg`;
+          const ext = contentType.includes("pdf")
+            ? "pdf"
+            : contentType.includes("video")
+            ? "mp4"
+            : contentType.includes("png")
+            ? "png"
+            : "jpg";
+
+          const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.${ext}`;
           const storageRef = ref(storage, fileName);
           await uploadBytes(storageRef, buffer, { contentType });
-          
+
           const publicUrl = await getDownloadURL(storageRef);
           finalizedMediaUrls.push(publicUrl);
-          console.log(`✅ Uploaded media to Firebase: ${publicUrl}`);
         } catch (e) {
           console.error("Failed to upload media:", e);
         }
       }
     }
 
-    // 2. Match guest in Firestore
+    // 2. Match Guest by phone number (last 10 digits)
     const rsvpGroupSnap = await getDocs(collectionGroup(db, "rsvps"));
     let matchedGuestDoc: any = null;
 
@@ -87,39 +81,67 @@ export async function POST(req: Request) {
     });
 
     if (matchedGuestDoc) {
-      const currentIds = matchedGuestDoc.data().idCardUrls || [];
+      const guestData = matchedGuestDoc.data();
+      const currentIds = guestData.idCardUrls || [];
       const updatedIds = [...currentIds, ...finalizedMediaUrls];
 
-      // Save to chat history
+      // Save incoming message in chat history
       await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
         direction: "inbound",
         body: body.trim(),
         mediaUrls: finalizedMediaUrls,
+        sid: messageSid,
+        status: "delivered",
         timestamp: new Date().toISOString(),
-        senderName: matchedGuestDoc.data().name || "Guest",
+        senderName: guestData.name || "Guest",
       });
 
-      // Update Guest Profile
+      // 3. 2-HOUR GAP CHECK
+      const lastInboundTime = guestData.lastGuestInboundAt
+        ? new Date(guestData.lastGuestInboundAt).getTime()
+        : 0;
+      const now = Date.now();
+      const twoHoursInMs = 2 * 60 * 60 * 1000;
+      const shouldSendAutoReply = !lastInboundTime || now - lastInboundTime > twoHoursInMs;
+
+      let replyText = "";
+      if (shouldSendAutoReply) {
+        replyText = "Namaste,We have recieved your message and our team will get back to you ASAP Regards Team Brajwal";
+
+        // Save auto-reply in chat history so executive sees it
+        await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
+          direction: "outbound",
+          body: replyText,
+          mediaUrls: [],
+          status: "delivered",
+          timestamp: new Date().toISOString(),
+          senderName: "Team Brajwal (Auto-Reply)",
+        });
+      }
+
+      // Update Guest Document with latest inbound time
       await updateDoc(doc(db, matchedGuestDoc.ref.path), {
         idCardUrls: updatedIds,
-        lastMessage: body.trim() || (finalizedMediaUrls.length > 0 ? `📷 Sent ${finalizedMediaUrls.length} ID photo(s)` : "Replied on WhatsApp"),
+        lastMessage:
+          body.trim() ||
+          (finalizedMediaUrls.length > 0
+            ? `📷 Sent ${finalizedMediaUrls.length} file(s)`
+            : "Replied on WhatsApp"),
         lastMessageAt: new Date().toISOString(),
+        lastGuestInboundAt: new Date().toISOString(), // resets 2-hr window
         hasUnreadMessages: true,
         ...(finalizedMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
       });
 
-      const replyText = finalizedMediaUrls.length > 0
-        ? `Namaste! We have received ${finalizedMediaUrls.length} ID card photo(s) for your family. Thank you! 🙏`
-        : `Namaste! We received your message. Please share photos of the ID cards for all family members attending.`;
-
-      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
-      return new Response(twimlResponse, { headers: { "Content-Type": "text/xml" } });
+      if (replyText) {
+        const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
+        return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
+      }
     }
 
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
-
   } catch (err) {
-    console.error("❌ WEBHOOK ERROR:", err);
+    console.error("Webhook Error:", err);
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   }
 }

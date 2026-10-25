@@ -9,10 +9,13 @@ const fromWhatsAppNumber = process.env.TWILIO_WHATSAPP_NUMBER;
 
 export async function POST(req: Request) {
   try {
-    const { handoverId, guestId, phone, message } = await req.json();
+    const { handoverId, guestId, phone, message, mediaUrl, fileName } = await req.json();
 
-    if (!phone || !message?.trim() || !handoverId || !guestId) {
+    if (!phone || !handoverId || !guestId) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+    if (!message?.trim() && !mediaUrl) {
+      return NextResponse.json({ error: "Must provide message text or media" }, { status: 400 });
     }
 
     const client = twilio(accountSid, authToken);
@@ -25,17 +28,23 @@ export async function POST(req: Request) {
       ? fromWhatsAppNumber
       : `whatsapp:${fromWhatsAppNumber}`;
 
-    // Send WhatsApp message via Twilio
-    const response = await client.messages.create({
+    const callbackUrl = `https://brajwal.com/api/twilio/status?handoverId=${handoverId}&guestId=${guestId}`;
+
+    const messageOptions: any = {
       from: formattedFrom,
       to: formattedTo,
-      body: message.trim(),
-    });
+      statusCallback: callbackUrl,
+    };
+    if (message?.trim()) messageOptions.body = message.trim();
+    if (mediaUrl) messageOptions.mediaUrl = [mediaUrl];
 
-    // Save message to guest's conversation history in Firestore
+    const response = await client.messages.create(messageOptions);
+
     await addDoc(collection(db, "handovers", handoverId, "rsvps", guestId, "messages"), {
       direction: "outbound",
-      body: message.trim(),
+      body: message?.trim() || "",
+      mediaUrls: mediaUrl ? [mediaUrl] : [],
+      fileName: fileName || null,
       sid: response.sid,
       status: "sent",
       timestamp: new Date().toISOString(),
@@ -43,7 +52,7 @@ export async function POST(req: Request) {
     });
 
     await updateDoc(doc(db, "handovers", handoverId, "rsvps", guestId), {
-      lastMessage: message.trim(),
+      lastMessage: message?.trim() || (mediaUrl ? "📎 Sent an attachment" : ""),
       lastMessageAt: new Date().toISOString(),
       whatsappStatus: "sent",
     });
