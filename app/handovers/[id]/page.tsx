@@ -607,6 +607,24 @@ export default function HandoverWorkspace() {
     await updateHandoverDaysInDb(updatedDays, `Removed Component: ${compName}`);
   };
 
+  // REORDER DECOR COMPONENT SEQUENCE (UP / DOWN)
+  const handleMoveDecorComponent = async (compIdx: number, direction: "up" | "down") => {
+    const targetIdx = direction === "up" ? compIdx - 1 : compIdx + 1;
+    const components = [...handover.days[selectedDayIndex].events[selectedEventIndex].decorComponents];
+
+    if (targetIdx < 0 || targetIdx >= components.length) return;
+
+    // Swap positions in the array
+    const temp = components[compIdx];
+    components[compIdx] = components[targetIdx];
+    components[targetIdx] = temp;
+
+    const updatedDays = [...handover.days];
+    updatedDays[selectedDayIndex].events[selectedEventIndex].decorComponents = components;
+
+    await updateHandoverDaysInDb(updatedDays);
+  };
+
   // ATTACH OTHER ITEM TO EVENT (NO PRICING RECORDED)
   const handleAddEntertainment = async () => {
     if (!selectedEntId) return;
@@ -1671,9 +1689,39 @@ export default function HandoverWorkspace() {
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">{item.code}</span>
-                                    <button onClick={() => handleDeleteDecorComponent(idx)} className="text-red-600 font-bold text-xs bg-red-50 p-1.5 rounded border border-red-200">Remove</button>
-                                  </div>
+  {/* ⬆️ ⬇️ SEQUENCE REORDER BUTTONS */}
+  <div className="flex items-center bg-gray-100 border border-gray-300 rounded-lg p-0.5 shadow-sm">
+    <button
+      type="button"
+      disabled={idx === 0}
+      onClick={() => handleMoveDecorComponent(idx, "up")}
+      className="px-2 py-1 text-xs font-black text-gray-700 hover:text-black hover:bg-white rounded transition disabled:opacity-25 disabled:cursor-not-allowed"
+      title="Move Up in Sequence"
+    >
+      ▲
+    </button>
+    <div className="w-[1px] h-3.5 bg-gray-300"></div>
+    <button
+      type="button"
+      disabled={idx === currentEvent.decorComponents.length - 1}
+      onClick={() => handleMoveDecorComponent(idx, "down")}
+      className="px-2 py-1 text-xs font-black text-gray-700 hover:text-black hover:bg-white rounded transition disabled:opacity-25 disabled:cursor-not-allowed"
+      title="Move Down in Sequence"
+    >
+      ▼
+    </button>
+  </div>
+
+  <span className="text-xs font-mono font-bold bg-gray-900 text-white px-2 py-1 rounded">
+    {item.code}
+  </span>
+  <button 
+    onClick={() => handleDeleteDecorComponent(idx)} 
+    className="text-red-600 font-bold text-xs bg-red-50 p-1.5 rounded border border-red-200 hover:bg-red-100 transition"
+  >
+    Remove
+  </button>
+</div>
                                 </div>
 
                                 <div className="bg-gray-50 p-2.5 rounded-lg border text-xs font-medium space-y-1">

@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { db } from "../../../../lib/firebase";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { useAuth } from "../../../../context/AuthContext";
+import ClientPresentationView from "../../../../components/ClientPresentationView";
 
 export default function HandoverPresentationPage() {
   const params = useParams();
@@ -14,6 +15,9 @@ export default function HandoverPresentationPage() {
   const [handover, setHandover] = useState<any>(null);
   const [componentsLibrary, setComponentsLibrary] = useState<any[]>([]);
   const [elementsLibrary, setElementsLibrary] = useState<any[]>([]);
+
+  // CUSTOMER VIEW TOGGLE
+  const [showClientDeck, setShowClientDeck] = useState(false);
 
   // FULL-SCREEN IMAGE LIGHTBOX MODAL (ON WEB)
   const [lightboxImage, setLightboxImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
@@ -57,6 +61,17 @@ export default function HandoverPresentationPage() {
     return <div className="p-12 text-center text-xl font-bold">Compiling Execution Handbook...</div>;
   }
 
+  // ✨ CRITICAL FIX: If Customer Version is active, ONLY render ClientPresentationView.
+  // This guarantees the browser prints ONLY the customer deck with zero production contamination!
+  if (showClientDeck) {
+    return (
+      <ClientPresentationView
+        handover={handover}
+        onClose={() => setShowClientDeck(false)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-gray-900 print:bg-white print:p-0">
       {/* FLOATING ACTION BAR (HIDDEN IN PDF PRINT) */}
@@ -77,19 +92,29 @@ export default function HandoverPresentationPage() {
           <span className="text-[11px] text-gray-400 hidden md:inline">
             💡 Click any image to expand full-screen
           </span>
+
+          {/* ✨ NEW CUSTOMER VERSION BUTTON ✨ */}
+          <button
+            type="button"
+            onClick={() => setShowClientDeck(true)}
+            className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-black font-black px-4 py-2.5 rounded-lg text-xs shadow-lg transition flex items-center gap-1.5"
+          >
+            👑 Customer Presentation (PDF)
+          </button>
+
           <button
             onClick={handlePrintPdf}
             className="bg-blue-600 hover:bg-blue-700 text-white font-black px-6 py-2.5 rounded-lg text-xs shadow-lg transition flex items-center gap-2"
           >
-            🖨️ Download / Save as PDF
+            🖨️ Production Handbook (PDF)
           </button>
         </div>
       </header>
 
-      {/* DOCUMENT ROOT */}
+      {/* DOCUMENT ROOT: PRODUCTION HANDBOOK */}
       <main className="max-w-5xl mx-auto p-4 sm:p-8 space-y-8 print:max-w-full print:p-2 print:space-y-6">
 
-        {/* 1. COVER / EXECUTIVE SUMMARY (ZERO PRICING) */}
+        {/* 1. COVER / EXECUTIVE SUMMARY */}
         <section className="bg-white border-2 border-gray-300 rounded-2xl p-6 sm:p-8 shadow-sm print:border print:rounded-none print:p-6 print:shadow-none print-avoid-break">
           <div className="flex justify-between items-start border-b-2 border-gray-900 pb-4">
             <div>
@@ -211,7 +236,7 @@ export default function HandoverPresentationPage() {
                   </div>
                 )}
 
-                {/* EVENT 2D FLOOR PLAN (PLANNER 5D) */}
+                {/* EVENT 2D FLOOR PLAN */}
                 {ev.floorPlans?.plan2dUrl && (
                   <div className="bg-slate-50 border-2 border-emerald-300 rounded-2xl p-4 space-y-2 print-avoid-break">
                     <div className="flex justify-between items-center border-b border-emerald-200 pb-1">
@@ -247,7 +272,7 @@ export default function HandoverPresentationPage() {
                   </div>
                 )}
                 
-                {/* 2A. DECOR COMPONENTS (UNCROPPED TRUE-SHAPE IMAGES) */}
+                {/* 2A. DECOR COMPONENTS */}
                 <div className="space-y-8">
                   <h4 className="text-xs font-black uppercase tracking-wider text-blue-900 border-b pb-1">
                     🏛️ Decor Components Execution Scope ({ev.decorComponents?.length || 0})
@@ -289,7 +314,7 @@ export default function HandoverPresentationPage() {
                           </div>
                         </div>
 
-                        {/* COMPONENT IMAGE: FITTED & UNCROPPED (TRUE ASPECT RATIO IN PRINT) */}
+                        {/* COMPONENT IMAGE */}
                         <div className="w-full rounded-xl overflow-hidden border-2 border-gray-200 bg-gray-50 print:bg-white flex items-center justify-center p-1 print:p-0">
                           {comp.imageUrl ? (
                             <div
@@ -370,7 +395,7 @@ export default function HandoverPresentationPage() {
                           </div>
                         )}
 
-                        {/* ATTACHED WAREHOUSE PROPS (FITTED, UNCROPPED THUMBNAILS) */}
+                        {/* ATTACHED WAREHOUSE PROPS (Internal Only) */}
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                           <span className="font-black uppercase text-gray-800 block text-xs border-b pb-1">
                             📦 Attached Warehouse Props ({warehouseElementsUsed.length}):
@@ -387,7 +412,6 @@ export default function HandoverPresentationPage() {
                                     key={elIdx}
                                     className="bg-white border-2 border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between"
                                   >
-                                    {/* Prop Image Box: object-contain so props are never cut off */}
                                     <div
                                       onClick={() => {
                                         if (propPic) {
@@ -421,7 +445,6 @@ export default function HandoverPresentationPage() {
                                       </span>
                                     </div>
 
-                                    {/* Prop Details */}
                                     <div className="p-2.5 text-xs space-y-0.5 bg-white border-t border-gray-100">
                                       <p className="font-black text-gray-900 leading-snug">
                                         {el.elementName}
@@ -479,7 +502,7 @@ export default function HandoverPresentationPage() {
                           )}
                         </div>
 
-                        {/* Execution Steps & General Precautions */}
+                        {/* Steps */}
                         {(setupSteps.length > 0 || writtenNotes) && (
                           <div className="p-4 bg-gray-50 rounded-xl space-y-3 border">
                             {setupSteps.length > 0 && (
@@ -512,7 +535,7 @@ export default function HandoverPresentationPage() {
                   })}
                 </div>
 
-                {/* 2B. ENTERTAINMENT & SFX SCOPE */}
+                {/* 2B. ENTERTAINMENT & SFX */}
                 {ev.entertainmentElements && ev.entertainmentElements.length > 0 && (
                   <div className="space-y-3 pt-2 print-avoid-break">
                     <h4 className="text-xs font-black uppercase tracking-wider text-purple-900 border-b pb-1">
@@ -577,7 +600,7 @@ export default function HandoverPresentationPage() {
         </section>
       </main>
 
-      {/* FULL-SCREEN INTERACTIVE LIGHTBOX MODAL (ON WEB) */}
+      {/* FULL-SCREEN INTERACTIVE LIGHTBOX MODAL */}
       {lightboxImage && (
         <div
           onClick={() => setLightboxImage(null)}
@@ -610,7 +633,7 @@ export default function HandoverPresentationPage() {
         </div>
       )}
 
-      {/* PRINT-OPTIMIZED STYLESHEET: STRICTLY FORCING UNCROPPED IMAGES */}
+      {/* PRINT-OPTIMIZED STYLESHEET */}
       <style jsx global>{`
         @media print {
           body {
@@ -631,7 +654,6 @@ export default function HandoverPresentationPage() {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
-          /* FORCE ALL IMAGES TO BE FITTED AND UNCROPPED */
           img {
             object-fit: contain !important;
             max-width: 100% !important;

@@ -118,10 +118,59 @@ export default function WeddingLaborPlannerPage() {
     setWeddingLaborList(updated);
   };
 
-  // Update Days Count for a labor trade
+  // Update Days Count for a labor trade & DYNAMICALLY EXPAND dayShifts array so new boxes appear immediately
   const updateDaysCount = (idx: number, days: number) => {
     const updated = [...weddingLaborList];
-    updated[idx].daysCount = Math.max(1, days);
+    const targetDays = Math.max(0, days);
+    updated[idx].daysCount = targetDays;
+
+    const currentShifts = [...updated[idx].dayShifts];
+
+    // If targetDays is greater than current shifts length, auto-create the missing day boxes!
+    if (targetDays > currentShifts.length) {
+      for (let i = currentShifts.length; i < targetDays; i++) {
+        const weddingDayName = handover?.days?.[i]?.dayName;
+        currentShifts.push({
+          dayName: weddingDayName || `Day ${i + 1}`,
+          isActive: true,
+          shifts: 2, // Standard default shifts for the new day
+        });
+      }
+    }
+
+    // Automatically sync active state: first targetDays are active, rest inactive
+    updated[idx].dayShifts = currentShifts.map((d, dIdx) => ({
+      ...d,
+      isActive: dIdx < targetDays,
+    }));
+
+    setWeddingLaborList(updated);
+  };
+
+  // Add an Extra Day Box directly to a trade
+  const handleAddDayBox = (idx: number) => {
+    const updated = [...weddingLaborList];
+    const currentShifts = [...updated[idx].dayShifts];
+    const nextIndex = currentShifts.length;
+    const weddingDayName = handover?.days?.[nextIndex]?.dayName;
+
+    currentShifts.push({
+      dayName: weddingDayName || `Extra Day ${nextIndex + 1}`,
+      isActive: true,
+      shifts: 2,
+    });
+
+    updated[idx].dayShifts = currentShifts;
+    updated[idx].daysCount = currentShifts.filter((d) => d.isActive).length;
+
+    setWeddingLaborList(updated);
+  };
+
+  // Delete a specific day box from a trade
+  const handleDeleteDayBox = (itemIdx: number, dayIdx: number) => {
+    const updated = [...weddingLaborList];
+    updated[itemIdx].dayShifts.splice(dayIdx, 1);
+    updated[itemIdx].daysCount = updated[itemIdx].dayShifts.filter((d) => d.isActive).length;
     setWeddingLaborList(updated);
   };
 
@@ -132,10 +181,15 @@ export default function WeddingLaborPlannerPage() {
     setWeddingLaborList(updated);
   };
 
-  // Toggle Day Active/Inactive for a trade
+  // Toggle Day Active/Inactive for a trade & keep Days Count in sync
   const toggleDayActive = (itemIdx: number, dayIdx: number) => {
     const updated = [...weddingLaborList];
-    updated[itemIdx].dayShifts[dayIdx].isActive = !updated[itemIdx].dayShifts[dayIdx].isActive;
+    const item = updated[itemIdx];
+    item.dayShifts[dayIdx].isActive = !item.dayShifts[dayIdx].isActive;
+
+    // Keep active days count in sync with the toggled days
+    item.daysCount = item.dayShifts.filter((d) => d.isActive).length;
+
     setWeddingLaborList(updated);
   };
 
@@ -180,14 +234,16 @@ export default function WeddingLaborPlannerPage() {
     if (item.headcount > 0) {
       grandTotalHeadcount += item.headcount;
 
-      // Calculate total shifts for this trade
       const activeDays = item.dayShifts.filter((d) => d.isActive);
-      const shiftsPerPerson = activeDays.reduce((sum, d) => sum + Number(d.shifts), 0);
+      const effectiveDays = item.daysCount !== undefined && item.daysCount !== null ? item.daysCount : activeDays.length;
+
+      // Shifts per person: sum of active shifts
+      const shiftsPerPerson = activeDays.reduce((sum, d) => sum + Number(d.shifts || 0), 0);
       const totalShifts = item.headcount * shiftsPerPerson;
       grandTotalShiftsCost += totalShifts * item.ratePerShift;
 
-      // Food Cost: 3 meals * active days * headcount * costPerMeal
-      const totalMeals = item.headcount * activeDays.length * (item.mealsPerDay || 3);
+      // Food Cost: adjusted for effective active days
+      const totalMeals = item.headcount * effectiveDays * (item.mealsPerDay || 3);
       grandTotalFoodCost += totalMeals * (item.costPerMeal || globalCostPerMeal);
 
       // Travel Cost: 1 round trip per person
@@ -340,10 +396,14 @@ export default function WeddingLaborPlannerPage() {
           <div className="space-y-6">
             {weddingLaborList.map((item, idx) => {
               const activeDays = item.dayShifts.filter((d) => d.isActive);
-              const shiftsPerPerson = activeDays.reduce((sum, d) => sum + Number(d.shifts), 0);
+              const effectiveDays = item.daysCount !== undefined && item.daysCount !== null ? item.daysCount : activeDays.length;
+
+              // Total shifts per person calculated directly from all active day shift boxes
+              const shiftsPerPerson = activeDays.reduce((sum, d) => sum + Number(d.shifts || 0), 0);
+
               const totalShifts = item.headcount * shiftsPerPerson;
               const lineShiftCost = totalShifts * item.ratePerShift;
-              const totalMeals = item.headcount * activeDays.length * (item.mealsPerDay || 3);
+              const totalMeals = item.headcount * effectiveDays * (item.mealsPerDay || 3);
               const lineFoodCost = totalMeals * item.costPerMeal;
               const lineTravelCost = item.headcount * item.travelCostPerPerson;
               const lineTotalCost = lineShiftCost + lineFoodCost + lineTravelCost;
@@ -397,8 +457,8 @@ export default function WeddingLaborPlannerPage() {
                       <label className="block font-black text-gray-800 mb-1">Active Days Needed</label>
                       <input
                         type="number"
-                        min="1"
-                        value={item.daysCount || activeDays.length}
+                        min="0"
+                        value={item.daysCount ?? activeDays.length}
                         onChange={(e) => updateDaysCount(idx, Number(e.target.value))}
                         className="w-full border-2 border-gray-400 p-2 rounded-lg font-bold text-sm text-center bg-white text-gray-900"
                       />
@@ -435,44 +495,73 @@ export default function WeddingLaborPlannerPage() {
 
                   {/* Day-by-Day Shift Customization Grid */}
                   <div className="space-y-2">
-                    <span className="text-[11px] font-black uppercase text-gray-700 block">
-                      🗓️ Day-Wise Shift Allocation (Click to change shifts on specific days):
-                    </span>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] font-black uppercase text-gray-700 block">
+                        🗓️ Day-Wise Shift Allocation (Click to change shifts on specific days):
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleAddDayBox(idx)}
+                        className="bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 px-2 py-0.5 rounded text-[10px] font-black transition flex items-center gap-1 shadow-sm"
+                      >
+                        + Add Extra Day
+                      </button>
+                    </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {item.dayShifts.map((dayShift, dIdx) => (
                         <div
                           key={dIdx}
-                          className={`p-2.5 rounded-xl border-2 transition text-xs space-y-1 ${
-                            dayShift.isActive ? "bg-white border-amber-400" : "bg-gray-100 border-gray-300 opacity-60"
+                          className={`p-2.5 rounded-xl border-2 transition text-xs space-y-1.5 ${
+                            dayShift.isActive ? "bg-white border-amber-400 shadow-sm" : "bg-gray-100 border-gray-300 opacity-60"
                           }`}
                         >
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold text-gray-900 truncate">{dayShift.dayName}</span>
-                            <button
-                              type="button"
-                              onClick={() => toggleDayActive(idx, dIdx)}
-                              className={`text-[10px] font-black px-1.5 py-0.2 rounded ${
-                                dayShift.isActive ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-600"
-                              }`}
-                            >
-                              {dayShift.isActive ? "Active" : "Off"}
-                            </button>
+                          <div className="flex justify-between items-center gap-1">
+                            <span className="font-bold text-gray-900 truncate text-[11px]" title={dayShift.dayName}>
+                              {dayShift.dayName}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleDayActive(idx, dIdx)}
+                                className={`text-[10px] font-black px-1.5 py-0.5 rounded transition ${
+                                  dayShift.isActive ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                                }`}
+                              >
+                                {dayShift.isActive ? "Active" : "Off"}
+                              </button>
+                              {/* Option to delete day if it's an extra custom day */}
+                              {dIdx >= (handover?.days?.length || 4) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDayBox(idx, dIdx)}
+                                  className="text-red-500 hover:text-red-700 font-black text-xs px-1"
+                                  title="Delete Day"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
                           </div>
 
-                          {dayShift.isActive && (
-                            <div className="flex items-center justify-between pt-1">
-                              <span className="text-[10px] font-semibold text-gray-500">Shifts:</span>
+                          {/* SHIFTS SELECTION BOX (Always appears when day is active) */}
+                          {dayShift.isActive ? (
+                            <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                              <span className="text-[10px] font-bold text-gray-600">Shifts:</span>
                               <select
                                 value={dayShift.shifts}
                                 onChange={(e) => updateSpecificDayShift(idx, dIdx, Number(e.target.value))}
-                                className="border border-gray-400 p-0.5 rounded font-black text-xs bg-white text-gray-900"
+                                className="border border-gray-400 p-1 rounded font-black text-xs bg-white text-gray-900 shadow-sm focus:border-amber-600 outline-none"
                               >
                                 <option value={1}>1 Shift (8h)</option>
                                 <option value={2}>2 Shifts (Standard)</option>
                                 <option value={3}>3 Shifts (Heavy)</option>
                                 <option value={4}>4 Shifts (24h)</option>
                               </select>
+                            </div>
+                          ) : (
+                            <div className="pt-1 text-[10px] text-gray-400 italic text-center">
+                              No shifts assigned (Off)
                             </div>
                           )}
                         </div>
