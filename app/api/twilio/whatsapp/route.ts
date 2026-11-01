@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, storage } from "../../../../lib/firebase";
-import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc } from "firebase/firestore";
+import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc, query, where, limit } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export async function GET(req: Request) {
@@ -30,7 +30,9 @@ export async function POST(req: Request) {
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // 1. Download incoming attachments and upload to Firebase
+    const tenDigitPhone = cleanSenderPhone.slice(-10);
+
+    // 1. Download incoming attachments and upload to Firebase Storage (Recognizes both Images and PDFs)
     const finalizedMediaUrls: string[] = [];
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -38,7 +40,7 @@ export async function POST(req: Request) {
 
     for (let i = 0; i < numMedia; i++) {
       const mediaUrl = params.get(`MediaUrl${i}`);
-      const contentType = params.get(`MediaContentType${i}`) || "image/jpeg";
+      const contentType = (params.get(`MediaContentType${i}`) || "image/jpeg").toLowerCase();
 
       if (mediaUrl) {
         try {
@@ -68,17 +70,39 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Match Guest by phone number (last 10 digits)
-    const rsvpGroupSnap = await getDocs(collectionGroup(db, "rsvps"));
+    // 2. TARGETED QUERY: Look up guest by indexed phone candidates (Eliminates full database scans)
     let matchedGuestDoc: any = null;
 
-    rsvpGroupSnap.forEach((d) => {
-      const data = d.data();
-      const guestPhoneClean = (data.phone || "").replace(/[^0-9]/g, "");
-      if (guestPhoneClean.slice(-10) === cleanSenderPhone.slice(-10)) {
-        matchedGuestDoc = d;
+    // Search by clean 10-digit phone
+    const qClean = query(
+      collectionGroup(db, "rsvps"),
+      where("cleanPhone", "==", tenDigitPhone),
+      limit(1)
+    );
+    const snapClean = await getDocs(qClean);
+
+    if (!snapClean.empty) {
+      matchedGuestDoc = snapClean.docs[0];
+    } else {
+      // Fallback: search standard phone field variants
+      const phoneVariants = [
+        tenDigitPhone,
+        `+91${tenDigitPhone}`,
+        `91${tenDigitPhone}`,
+        cleanSenderPhone,
+        `+${cleanSenderPhone}`,
+      ];
+
+      const qPhone = query(
+        collectionGroup(db, "rsvps"),
+        where("phone", "in", phoneVariants),
+        limit(1)
+      );
+      const snapPhone = await getDocs(qPhone);
+      if (!snapPhone.empty) {
+        matchedGuestDoc = snapPhone.docs[0];
       }
-    });
+    }
 
     if (matchedGuestDoc) {
       const guestData = matchedGuestDoc.data();
@@ -96,7 +120,7 @@ export async function POST(req: Request) {
         senderName: guestData.name || "Guest",
       });
 
-      // 3. 2-HOUR GAP CHECK
+      // 3. 2-Hour Auto-Reply Window Logic
       const lastInboundTime = guestData.lastGuestInboundAt
         ? new Date(guestData.lastGuestInboundAt).getTime()
         : 0;
@@ -106,9 +130,8 @@ export async function POST(req: Request) {
 
       let replyText = "";
       if (shouldSendAutoReply) {
-        replyText = "Namaste,We have recieved your message and our team will get back to you ASAP Regards Team Brajwal";
+        replyText = "Namaste, We have received your message and our team will get back to you ASAP. Regards, Team Brajwal";
 
-        // Save auto-reply in chat history so executive sees it
         await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
           direction: "outbound",
           body: replyText,
@@ -119,17 +142,18 @@ export async function POST(req: Request) {
         });
       }
 
-      // Update Guest Document with latest inbound time
+      // Update Guest Document
       await updateDoc(doc(db, matchedGuestDoc.ref.path), {
         idCardUrls: updatedIds,
         lastMessage:
           body.trim() ||
           (finalizedMediaUrls.length > 0
-            ? `📷 Sent ${finalizedMediaUrls.length} file(s)`
+            ? `📎 Received ${finalizedMediaUrls.length} file(s)`
             : "Replied on WhatsApp"),
         lastMessageAt: new Date().toISOString(),
-        lastGuestInboundAt: new Date().toISOString(), // resets 2-hr window
+        lastGuestInboundAt: new Date().toISOString(),
         hasUnreadMessages: true,
+        cleanPhone: tenDigitPhone, // backfills clean phone for future lookups
         ...(finalizedMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
       });
 

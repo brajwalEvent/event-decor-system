@@ -1,8 +1,12 @@
 import { db } from "../../../../lib/firebase";
-import { collectionGroup, getDocs, updateDoc, doc, query, where } from "firebase/firestore";
+import { collectionGroup, getDocs, updateDoc, doc, query, where, collection } from "firebase/firestore";
 
 export async function POST(req: Request) {
   try {
+    const url = new URL(req.url);
+    const qHandoverId = url.searchParams.get("handoverId");
+    const qGuestId = url.searchParams.get("guestId");
+
     const textData = await req.text();
     const params = new URLSearchParams(textData);
 
@@ -10,26 +14,42 @@ export async function POST(req: Request) {
     const messageStatus = params.get("MessageStatus") || params.get("SmsStatus"); // 'sent', 'delivered', 'read', 'failed'
 
     if (messageSid && messageStatus) {
-      console.log(`[Twilio Status] SID: ${messageSid} -> Status: ${messageStatus}`);
+      console.log(`[Twilio Status Webhook] SID: ${messageSid} -> Status: ${messageStatus}`);
 
-      // Query across all messages by Twilio SID
-      const q = query(collectionGroup(db, "messages"), where("sid", "==", messageSid));
-      const snap = await getDocs(q);
+      // Fast-path: If handoverId and guestId were passed in the callback URL
+      if (qHandoverId && qGuestId) {
+        const msgCol = collection(db, "handovers", qHandoverId, "rsvps", qGuestId, "messages");
+        const qMsg = query(msgCol, where("sid", "==", messageSid));
+        const snap = await getDocs(qMsg);
 
-      // MUST use for...of so serverless awaits Firestore writes before closing response
-      for (const d of snap.docs) {
-        // 1. Update the individual message status
-        await updateDoc(doc(db, d.ref.path), {
-          status: messageStatus,
-          statusUpdatedAt: new Date().toISOString(),
-        });
-
-        // 2. Update the parent guest document so the main table shows delivered/read
-        const guestDocRef = d.ref.parent.parent;
-        if (guestDocRef) {
-          await updateDoc(doc(db, guestDocRef.path), {
-            whatsappStatus: messageStatus,
+        for (const d of snap.docs) {
+          await updateDoc(doc(db, d.ref.path), {
+            status: messageStatus,
+            statusUpdatedAt: new Date().toISOString(),
           });
+        }
+
+        // Also update parent guest document status
+        await updateDoc(doc(db, "handovers", qHandoverId, "rsvps", qGuestId), {
+          whatsappStatus: messageStatus,
+        });
+      } else {
+        // Fallback: collectionGroup across all messages
+        const q = query(collectionGroup(db, "messages"), where("sid", "==", messageSid));
+        const snap = await getDocs(q);
+
+        for (const d of snap.docs) {
+          await updateDoc(doc(db, d.ref.path), {
+            status: messageStatus,
+            statusUpdatedAt: new Date().toISOString(),
+          });
+
+          const guestDocRef = d.ref.parent.parent;
+          if (guestDocRef) {
+            await updateDoc(doc(db, guestDocRef.path), {
+              whatsappStatus: messageStatus,
+            });
+          }
         }
       }
     }

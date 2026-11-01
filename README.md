@@ -37,5 +37,5 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 
 git add .
-git commit -m "feat: complete accounting ERP with master ledger, float vendor payouts, and live treasury balance"
+git commit -m "presentation fixed, labour calculaiton fixed"
 git push origin main
