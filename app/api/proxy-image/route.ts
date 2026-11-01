@@ -9,7 +9,6 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Missing url parameter" }, { status: 400 });
     }
 
-    // Automatically inject Twilio authentication headers if requesting Twilio media
     const headers: Record<string, string> = {};
     if (mediaUrl.includes("api.twilio.com")) {
       const accountSid = (process.env.TWILIO_ACCOUNT_SID || "").trim();
@@ -20,28 +19,35 @@ export async function GET(req: Request) {
       }
     }
 
-    const response = await fetch(mediaUrl, { headers });
+    const response = await fetch(mediaUrl, { 
+      headers,
+      redirect: "follow",
+    });
+
     if (!response.ok) {
       return NextResponse.json(
-        { error: `Failed to fetch media (status: ${response.status})` },
+        { error: `Upstream media returned status: ${response.status}` },
         { status: response.status }
       );
     }
 
-    const blob = await response.blob();
+    const arrayBuffer = await response.arrayBuffer();
     const contentType =
       response.headers.get("content-type") ||
       (mediaUrl.toLowerCase().includes(".pdf") ? "application/pdf" : "image/jpeg");
 
-    return new Response(blob, {
+    return new Response(arrayBuffer, {
+      status: 200,
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": "inline", // Allows PDFs to render directly inside the preview iframe
+        "Content-Disposition": "inline",
         "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Cache-Control": "public, max-age=86400",
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("[Proxy Image Error]:", err);
+    return NextResponse.json({ error: err.message || "Failed to fetch media" }, { status: 500 });
   }
 }

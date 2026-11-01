@@ -71,6 +71,34 @@ export default function WeddingRsvpPage() {
   const [newAttendeeAgeGroup, setNewAttendeeAgeGroup] = useState("Adult");
   const [savingAttendees, setSavingAttendees] = useState(false);
 
+  // -------------------------------------------------------------
+  // MULTI-CROP STATE
+  // -------------------------------------------------------------
+  const [croppingPdfUrl, setCroppingPdfUrl] = useState<string | null>(null);
+  const [croppingPdfDoc, setCroppingPdfDoc] = useState<any | null>(null);
+  const [cropCurrentPage, setCropCurrentPage] = useState(1);
+  const [cropTotalPages, setCropTotalPages] = useState(1);
+  const [cropPdfLoading, setCropPdfLoading] = useState(false);
+
+  const cropCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [isDraggingCrop, setIsDraggingCrop] = useState(false);
+  const [dragStartPoint, setDragStartPoint] = useState<{ x: number; y: number } | null>(null);
+
+  // Cropped items collection tray
+  interface CroppedTrayItem {
+    id: string;
+    dataUrl: string;
+    blob: Blob;
+    page: number;
+  }
+  const [croppedTray, setCroppedTray] = useState<CroppedTrayItem[]>([]);
+  const [showSaveCropChoiceModal, setShowSaveCropChoiceModal] = useState(false);
+  const [isSavingCrops, setIsSavingCrops] = useState(false);
+  
+  // Specific old crops selected for replacement
+  const [selectedOldCropsToReplace, setSelectedOldCropsToReplace] = useState<Set<string>>(new Set());
+
   // WHATSAPP WEB STYLE CHAT
   const [isChatModalOpen, setIsChatModalOpen] = useState(false);
   const [activeChatGuest, setActiveChatGuest] = useState<any | null>(null);
@@ -103,7 +131,7 @@ export default function WeddingRsvpPage() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // REALTIME ON-SNAPSHOT FOR HANDOVER & ALL RSVPS
+  // Realtime onSnapshot listener for Handover and Guests
   useEffect(() => {
     if (!handoverId) return;
 
@@ -130,7 +158,28 @@ export default function WeddingRsvpPage() {
     return () => unsubscribe();
   }, [handoverId]);
 
-  // AUTO-SCROLL TO BOTTOM FUNCTION
+  // Smart PDF & Media Helper
+  const isPdfFile = (url: string, msgBody?: string) => {
+    const u = (url || "").toLowerCase();
+    const b = (msgBody || "").toLowerCase();
+    return u.includes(".pdf") || u.includes("application/pdf") || b.endsWith(".pdf") || b.includes(".pdf");
+  };
+
+  const getMediaDisplayUrl = (url: string) => {
+    if (!url) return "";
+    if (url.includes("api.twilio.com") || url.toLowerCase().includes(".pdf")) {
+      return `/api/proxy-image?url=${encodeURIComponent(url)}`;
+    }
+    return url;
+  };
+
+  const cleanPhoneNumber = (val: any): string => {
+    if (!val) return "";
+    let s = String(val).replace(/[^0-9]/g, "");
+    if (s.length === 11 && s.startsWith("0")) s = s.slice(1);
+    return s;
+  };
+
   const scrollToLatestMessage = (smooth = false) => {
     setTimeout(() => {
       if (messagesEndRef.current) {
@@ -142,7 +191,6 @@ export default function WeddingRsvpPage() {
     }, 60);
   };
 
-  // Real-time listener for active chat guest's individual messages
   useEffect(() => {
     if (!activeChatGuest || !handoverId) return;
 
@@ -165,44 +213,14 @@ export default function WeddingRsvpPage() {
     return () => unsubscribe();
   }, [activeChatGuest?.id, handoverId]);
 
-  // Auto-scroll when chat modal opens or active chat switches
   useEffect(() => {
     if (isChatModalOpen && activeChatGuest) {
       scrollToLatestMessage(false);
-      // Double check after modal transitions
       setTimeout(() => scrollToLatestMessage(false), 200);
     }
   }, [isChatModalOpen, activeChatGuest?.id]);
 
-  // Smart PDF detection (checks both URL and message filename text)
-  const isPdfFile = (url: string, msgBody?: string) => {
-    const u = (url || "").toLowerCase();
-    const b = (msgBody || "").toLowerCase();
-    return (
-      u.includes(".pdf") ||
-      u.includes("application/pdf") ||
-      b.endsWith(".pdf") ||
-      b.includes(".pdf")
-    );
-  };
-  
-   // Converts raw Twilio media URLs through your proxy with credentials
-  const getMediaDisplayUrl = (url: string) => {
-    if (!url) return "";
-    if (url.includes("api.twilio.com")) {
-      return `/api/proxy-image?url=${encodeURIComponent(url)}`;
-    }
-    return url;
-  };
-
-  const cleanPhoneNumber = (val: any): string => {
-    if (!val) return "";
-    let s = String(val).replace(/[^0-9]/g, "");
-    if (s.length === 11 && s.startsWith("0")) s = s.slice(1);
-    return s;
-  };
-
-  // WHATSAPP DELIVERY TICKS SVG COMPONENT
+  // DELIVERY TICKS SVG
   const renderMessageTicks = (status?: string) => {
     switch (status) {
       case "read":
@@ -232,9 +250,6 @@ export default function WeddingRsvpPage() {
             </svg>
           </span>
         );
-      case "failed":
-      case "undelivered":
-        return <span className="text-red-600 font-bold text-xs ml-1" title="Failed">✕</span>;
       default:
         return (
           <span className="inline-flex items-center text-gray-400 ml-1">
@@ -243,6 +258,275 @@ export default function WeddingRsvpPage() {
             </svg>
           </span>
         );
+    }
+  };
+
+  // -------------------------------------------------------------
+  // MULTI-CROP ENGINE: LOADS VIA RAW BYTES (NO CORS / NO FAILED TO FETCH)
+  // -------------------------------------------------------------
+  const handleOpenPdfCropper = async (pdfUrl: string) => {
+    setCroppingPdfUrl(pdfUrl);
+    setCroppedTray([]);
+    setCropCurrentPage(1);
+    setCropPdfLoading(true);
+    setCropRect(null);
+
+    try {
+      const proxyUrl = getMediaDisplayUrl(pdfUrl);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) {
+        throw new Error(`Failed to download PDF (HTTP ${res.status})`);
+      }
+      const arrayBuffer = await res.arrayBuffer();
+
+      if (!(window as any).pdfjsLib) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Failed to load PDF engine"));
+          document.head.appendChild(script);
+        });
+        (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      }
+
+      const pdfjsLib = (window as any).pdfjsLib;
+
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(arrayBuffer),
+      });
+
+      const pdf = await loadingTask.promise;
+      setCroppingPdfDoc(pdf);
+      setCropTotalPages(pdf.numPages);
+      renderPdfPageToCropCanvas(pdf, 1);
+    } catch (err: any) {
+      console.error("[Cropper Load Error]:", err);
+      alert("Could not load PDF: " + (err.message || "Failed to fetch"));
+      setCroppingPdfUrl(null);
+    } finally {
+      setCropPdfLoading(false);
+    }
+  };
+
+  const renderPdfPageToCropCanvas = async (pdfDoc: any, pageNum: number) => {
+    if (!pdfDoc || !cropCanvasRef.current) return;
+    setCropPdfLoading(true);
+    setCropRect(null);
+
+    try {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = cropCanvasRef.current;
+      const ctx = canvas.getContext("2d");
+
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      await page.render({ canvasContext: ctx!, viewport }).promise;
+    } catch (err) {
+      console.error("Canvas render page error:", err);
+    } finally {
+      setCropPdfLoading(false);
+    }
+  };
+
+  const handleNextCropPage = () => {
+    if (!croppingPdfDoc || cropCurrentPage >= cropTotalPages) return;
+    const nextP = cropCurrentPage + 1;
+    setCropCurrentPage(nextP);
+    renderPdfPageToCropCanvas(croppingPdfDoc, nextP);
+  };
+
+  const handlePrevCropPage = () => {
+    if (!croppingPdfDoc || cropCurrentPage <= 1) return;
+    const prevP = cropCurrentPage - 1;
+    setCropCurrentPage(prevP);
+    renderPdfPageToCropCanvas(croppingPdfDoc, prevP);
+  };
+
+  // Mouse / Touch Selection Box
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = cropCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    setIsDraggingCrop(true);
+    setDragStartPoint({ x, y });
+    setCropRect({ x, y, w: 0, h: 0 });
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDraggingCrop || !dragStartPoint || !cropCanvasRef.current) return;
+    const canvas = cropCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+
+    const x = Math.min(dragStartPoint.x, currentX);
+    const y = Math.min(dragStartPoint.y, currentY);
+    const w = Math.abs(currentX - dragStartPoint.x);
+    const h = Math.abs(currentY - dragStartPoint.y);
+
+    setCropRect({ x, y, w, h });
+  };
+
+  const handleCanvasMouseUp = () => {
+    setIsDraggingCrop(false);
+  };
+
+  // Extract selected area to Tray (Allows multiple crops on the same page)
+  const handleAddCropToTray = () => {
+    const canvas = cropCanvasRef.current;
+    if (!canvas) return;
+
+    const domRect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / domRect.width;
+    const scaleY = canvas.height / domRect.height;
+
+    let sx = 0, sy = 0, sw = canvas.width, sh = canvas.height;
+    if (cropRect && cropRect.w > 20 && cropRect.h > 20) {
+      sx = cropRect.x * scaleX;
+      sy = cropRect.y * scaleY;
+      sw = cropRect.w * scaleX;
+      sh = cropRect.h * scaleY;
+    }
+
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = sw;
+    tempCanvas.height = sh;
+    const tempCtx = tempCanvas.getContext("2d");
+    if (!tempCtx) return;
+
+    tempCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    const dataUrl = tempCanvas.toDataURL("image/jpeg", 0.95);
+    tempCanvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const newItem: CroppedTrayItem = {
+          id: `crop_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          dataUrl,
+          blob,
+          page: cropCurrentPage,
+        };
+        setCroppedTray((prev) => [...prev, newItem]);
+        setCropRect(null);
+      },
+      "image/jpeg",
+      0.95
+    );
+  };
+
+  const handleRemoveCropFromTray = (id: string) => {
+    setCroppedTray((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // -------------------------------------------------------------
+  // SMART SAVE LOGIC: FIRST-TIME DIRECT SAVE VS GRANULAR REPLACEMENT
+  // -------------------------------------------------------------
+  
+  // Helper to get previous crops for the active PDF
+  const getExistingCropsForActivePdf = (): string[] => {
+    if (!selectedAttendeeGuest || !croppingPdfUrl) return [];
+    const existingCropMap = selectedAttendeeGuest.pdfCropMap || {};
+    const previousCropsForThisPdf: string[] = existingCropMap[croppingPdfUrl] || [];
+    // Only return ones still present in the guest's idCardUrls
+    return previousCropsForThisPdf.filter((url) =>
+      (selectedAttendeeGuest.idCardUrls || []).includes(url)
+    );
+  };
+
+  // Clicked "Save & Attach ID Cards"
+  const handleInitiateSaveCrops = () => {
+    if (croppedTray.length === 0) return;
+    const existingCrops = getExistingCropsForActivePdf();
+
+    if (existingCrops.length === 0) {
+      // FIRST TIME CROPPING: Save directly without any prompt!
+      handleExecuteSaveCrops([]);
+    } else {
+      // PREVIOUS CROPS EXIST: Open granular replace modal
+      setSelectedOldCropsToReplace(new Set());
+      setShowSaveCropChoiceModal(true);
+    }
+  };
+
+  const handleToggleOldCropSelection = (url: string) => {
+    setSelectedOldCropsToReplace((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+  };
+
+  // Core execution: Uploads to Firebase Storage and modifies Firestore
+  const handleExecuteSaveCrops = async (urlsToReplace: string[]) => {
+    if (!selectedAttendeeGuest || !croppingPdfUrl || croppedTray.length === 0) return;
+
+    setIsSavingCrops(true);
+    setShowSaveCropChoiceModal(false);
+
+    try {
+      const cleanPhone = cleanPhoneNumber(selectedAttendeeGuest.phone);
+      const uploadedImageUrls: string[] = [];
+
+      for (let i = 0; i < croppedTray.length; i++) {
+        const item = croppedTray[i];
+        const fileName = `id_cards/${cleanPhone}_crop_${Date.now()}_p${item.page}_${i + 1}.jpg`;
+        const storageRef = ref(storage, fileName);
+
+        await uploadBytes(storageRef, item.blob, { contentType: "image/jpeg" });
+        const downloadUrl = await getDownloadURL(storageRef);
+        uploadedImageUrls.push(downloadUrl);
+      }
+
+      // Filter out only the selected replaced URLs from idCardUrls
+      let updatedIdUrls = (selectedAttendeeGuest.idCardUrls || []).filter(
+        (u: string) => !urlsToReplace.includes(u)
+      );
+      // Append the newly cropped ones
+      updatedIdUrls = [...updatedIdUrls, ...uploadedImageUrls];
+
+      // Remove replaced URLs from attendees assignments
+      const updatedAttendees = (selectedAttendeeGuest.attendees || []).map((att: any) => ({
+        ...att,
+        assignedIdUrls: (att.assignedIdUrls || []).filter((u: string) => !urlsToReplace.includes(u)),
+      }));
+
+      // Update mapping history
+      const existingCropMap = selectedAttendeeGuest.pdfCropMap || {};
+      const remainingOldCrops = (existingCropMap[croppingPdfUrl] || []).filter(
+        (u: string) => !urlsToReplace.includes(u)
+      );
+
+      await updateDoc(doc(db, "handovers", handoverId, "rsvps", selectedAttendeeGuest.id), {
+        idCardUrls: updatedIdUrls,
+        attendees: updatedAttendees,
+        pdfCropMap: {
+          ...existingCropMap,
+          [croppingPdfUrl]: [...remainingOldCrops, ...uploadedImageUrls],
+        },
+      });
+
+      setCroppingPdfUrl(null);
+      setCroppedTray([]);
+      setSelectedOldCropsToReplace(new Set());
+
+      const replaceMsg =
+        urlsToReplace.length > 0
+          ? ` and replaced ${urlsToReplace.length} old card(s)`
+          : "";
+      alert(`Success! Saved ${uploadedImageUrls.length} extracted ID card(s)${replaceMsg}. You can now assign them directly to each attendee.`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Error saving cropped images: " + (err.message || "Failed"));
+    } finally {
+      setIsSavingCrops(false);
     }
   };
 
@@ -734,7 +1018,6 @@ export default function WeddingRsvpPage() {
     }
   };
 
-  // QUICK UPDATE STATUS & NOTES
   const handleUpdateCounts = async (guestId: string, adults: number, minors: number, status: string, notes: string) => {
     const total = Math.max(0, adults) + Math.max(0, minors);
     await updateDoc(doc(db, "handovers", handoverId, "rsvps", guestId), {
@@ -965,23 +1248,30 @@ export default function WeddingRsvpPage() {
                         <div className="grid grid-cols-2 gap-3">
                           {att.assignedIdUrls.map((url: string, uIdx: number) => {
                             const isPdf = isPdfFile(url);
+                            const resolvedUrl = getMediaDisplayUrl(url);
+
                             return (
-                              <div key={uIdx} className="border-2 border-gray-300 rounded overflow-hidden p-2 bg-gray-50 flex flex-col items-center justify-center">
+                              <div
+                                key={uIdx}
+                                className="border-2 border-gray-300 rounded-lg p-2 bg-gray-50 flex flex-col justify-between items-center page-break-inside-avoid"
+                              >
                                 {isPdf ? (
-                                  <div className="text-center py-4">
-                                    <span className="text-3xl block">📄</span>
-                                    <strong className="text-[11px] text-blue-700 block">PDF Government ID Proof</strong>
-                                    <a href={url} target="_blank" rel="noreferrer" className="text-[9px] underline text-gray-500">
-                                      View Attached Document
-                                    </a>
+                                  <div className="border-2 border-dashed border-gray-300 rounded p-4 text-center w-full">
+                                    <span className="text-2xl block mb-1">📄</span>
+                                    <strong className="text-xs text-gray-800 block">PDF Government ID Proof</strong>
+                                    <span className="text-[10px] text-gray-500">Extract as cropped image for native paper printing</span>
                                   </div>
                                 ) : (
                                   <img
-                                    src={url}
+                                    src={resolvedUrl}
                                     alt="ID Document"
                                     className="w-full h-44 object-contain rounded bg-white"
                                   />
                                 )}
+                                <div className="w-full flex justify-between items-center pt-1.5 mt-1 border-t border-gray-200 text-[9px] text-gray-500 font-mono">
+                                  <span>Verified ID #{uIdx + 1}</span>
+                                  <span className="text-emerald-700 font-bold uppercase">{isPdf ? "Source PDF" : "Photo ID"}</span>
+                                </div>
                               </div>
                             );
                           })}
@@ -1037,7 +1327,7 @@ export default function WeddingRsvpPage() {
           </div>
         </div>
 
-        {/* BULK ACTION BAR WITH DELETE OPTION */}
+        {/* BULK ACTION BAR */}
         {selectedGuestIds.size > 0 && (
           <div className="bg-purple-900 text-white p-3.5 rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-3">
@@ -1465,6 +1755,7 @@ export default function WeddingRsvpPage() {
                             const assignedToName = getAssignedAttendeeName(url);
                             const isAssignedToOther = assignedToName && assignedToName !== att.name;
                             const isPdf = isPdfFile(url);
+                            const resolvedUrl = getMediaDisplayUrl(url);
 
                             return (
                               <div
@@ -1477,27 +1768,39 @@ export default function WeddingRsvpPage() {
                                     : "border-gray-200"
                                 }`}
                               >
-                                <div className="relative group h-32 w-full bg-gray-100 overflow-hidden flex items-center justify-center">
+                                <div className="relative group h-36 w-full bg-gray-100 overflow-hidden flex items-center justify-center">
                                   {isPdf ? (
-                                    <div className="flex flex-col items-center justify-center p-2 text-center">
-                                      <span className="text-4xl">📄</span>
-                                      <span className="text-[10px] font-black text-blue-800 mt-1 uppercase">PDF ID Proof</span>
+                                    <div className="flex flex-col items-center justify-center p-2 text-center w-full">
+                                      <span className="text-3xl">📄</span>
+                                      <span className="text-[10px] font-black text-blue-800 mt-0.5 uppercase">
+                                        Source PDF Document
+                                      </span>
+
+                                      {/* CROP BUTTON: OPENS MULTI-CROP MODAL */}
                                       <button
                                         type="button"
-                                        onClick={() => setActiveLightboxDoc(url)}
+                                        onClick={() => handleOpenPdfCropper(url)}
+                                        className="mt-1.5 w-full bg-purple-700 hover:bg-purple-800 text-white font-black text-[10px] py-1 px-2 rounded shadow flex items-center justify-center gap-1"
+                                      >
+                                        ✂️ Extract & Crop IDs
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveLightboxDoc(resolvedUrl)}
                                         className="text-[10px] text-blue-600 font-bold underline mt-1"
                                       >
-                                        🔍 Preview PDF
+                                        🔍 Preview Full PDF
                                       </button>
                                     </div>
                                   ) : (
                                     <>
-                                      <img src={url} alt="ID Thumbnail" className="w-full h-full object-cover" />
+                                      <img src={resolvedUrl} alt="ID Thumbnail" className="w-full h-full object-cover" />
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setActiveLightboxImg(url);
+                                          setActiveLightboxImg(resolvedUrl);
                                         }}
                                         className="absolute bottom-2 right-2 bg-black/75 hover:bg-black text-white px-2 py-1 rounded-md text-[10px] font-bold shadow flex items-center gap-1"
                                       >
@@ -1565,7 +1868,299 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* WHATSAPP WEB STYLE REAL UI DUAL-PANE CHAT MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {/* INTERACTIVE MULTI-CROP MODAL (SUPPORTS MULTIPLE CROPS PER PAGE) */}
+      {/* ------------------------------------------------------------- */}
+      {croppingPdfUrl && (
+        <div className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 no-print">
+          <div className="bg-white w-full max-w-6xl h-[92vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border-2 border-gray-300">
+            <div className="bg-gray-900 text-white px-6 py-3 flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-black flex items-center gap-2">
+                  ✂️ Extract & Crop Multiple IDs from PDF
+                </h3>
+                <p className="text-[11px] text-gray-300">
+                  Drag on the page to crop an ID card. You can crop multiple IDs from the same page (e.g. Front & Back, or multiple people).
+                </p>
+              </div>
+              <button
+                onClick={() => setCroppingPdfUrl(null)}
+                className="text-white hover:text-red-400 font-bold text-xl px-2"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-100">
+              {/* LEFT: CANVAS VIEWER */}
+              <div className="flex-1 flex flex-col items-center justify-between p-4 overflow-hidden">
+                <div className="flex items-center justify-between w-full max-w-2xl bg-white p-2 rounded-xl border shadow-sm mb-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handlePrevCropPage}
+                      disabled={cropCurrentPage <= 1 || cropPdfLoading}
+                      className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded font-bold disabled:opacity-40"
+                    >
+                      ← Prev Page
+                    </button>
+                    <span className="font-bold text-gray-700">
+                      Page {cropCurrentPage} of {cropTotalPages}
+                    </span>
+                    <button
+                      onClick={handleNextCropPage}
+                      disabled={cropCurrentPage >= cropTotalPages || cropPdfLoading}
+                      className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded font-bold disabled:opacity-40"
+                    >
+                      Next Page →
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCropRect(null)}
+                      className="px-2.5 py-1 text-gray-500 hover:text-black font-semibold text-[11px]"
+                    >
+                      Reset Box
+                    </button>
+                    <button
+                      onClick={handleAddCropToTray}
+                      disabled={cropPdfLoading}
+                      className="bg-purple-700 hover:bg-purple-800 text-white font-black px-3.5 py-1.5 rounded-lg shadow flex items-center gap-1.5 animate-pulse"
+                    >
+                      ➕ Crop This Selection
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative flex-1 w-full max-w-2xl flex items-center justify-center overflow-auto border-2 border-dashed border-gray-300 rounded-xl bg-gray-200 p-2">
+                  {cropPdfLoading && (
+                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center font-bold text-sm text-gray-600 z-20">
+                      Loading PDF Engine & Page {cropCurrentPage}...
+                    </div>
+                  )}
+
+                  <div className="relative inline-block select-none shadow-lg">
+                    <canvas
+                      ref={cropCanvasRef}
+                      onMouseDown={handleCanvasMouseDown}
+                      onMouseMove={handleCanvasMouseMove}
+                      onMouseUp={handleCanvasMouseUp}
+                      className="max-h-[62vh] max-w-full w-auto object-contain cursor-crosshair rounded bg-white block"
+                    />
+
+                    {cropRect && (
+                      <div
+                        style={{
+                          left: `${cropRect.x}px`,
+                          top: `${cropRect.y}px`,
+                          width: `${cropRect.w}px`,
+                          height: `${cropRect.h}px`,
+                        }}
+                        className="absolute border-2 border-dashed border-emerald-500 bg-emerald-500/20 pointer-events-none"
+                      >
+                        <span className="absolute top-1 left-1 bg-emerald-700 text-white text-[9px] px-1 font-bold rounded">
+                          Crop Box
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-gray-500 font-medium mt-1">
+                  💡 Tip: Click and drag across the Aadhaar or Passport card on screen, then click <strong>"➕ Crop This Selection"</strong>. You can repeat this multiple times on this same page!
+                </p>
+              </div>
+
+              {/* RIGHT: CROPPED IDS TRAY */}
+              <div className="w-full md:w-80 lg:w-96 bg-white border-l flex flex-col justify-between">
+                <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                  <div>
+                    <h4 className="font-black text-sm text-gray-900">Cropped Cards Tray</h4>
+                    <span className="text-xs text-gray-500 font-semibold">{croppedTray.length} ID card(s) ready</span>
+                  </div>
+                  {croppedTray.length > 0 && (
+                    <button
+                      onClick={() => setCroppedTray([])}
+                      className="text-xs text-red-600 hover:underline font-bold"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {croppedTray.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      className="border-2 border-gray-200 rounded-xl p-2 bg-slate-50 flex items-center justify-between gap-3 shadow-sm hover:border-purple-300"
+                    >
+                      <img
+                        src={item.dataUrl}
+                        alt="Crop Thumbnail"
+                        className="w-24 h-16 object-contain rounded border bg-white"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <strong className="text-xs text-gray-900 block truncate">ID Card #{idx + 1}</strong>
+                        <span className="text-[10px] text-gray-500 block">Cropped from Page {item.page}</span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveCropFromTray(item.id)}
+                        className="text-red-500 hover:text-red-700 text-base font-bold p-1"
+                        title="Delete this crop"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+
+                  {croppedTray.length === 0 && (
+                    <div className="py-20 text-center text-gray-400 text-xs italic space-y-2">
+                      <span className="text-4xl block">✂️</span>
+                      <p>No cards cropped yet.</p>
+                      <p className="text-[11px] text-gray-400">
+                        Drag a box on the left and click "Crop This Selection".
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer Save Button */}
+                <div className="p-4 border-t bg-gray-50">
+                  <button
+                    onClick={handleInitiateSaveCrops}
+                    disabled={croppedTray.length === 0 || isSavingCrops}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-lg transition disabled:opacity-40 flex items-center justify-center gap-2"
+                  >
+                    {isSavingCrops ? "Uploading to Cloud..." : `Save & Attach (${croppedTray.length}) ID Cards ➤`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* GRANULAR REPLACEMENT MODAL (WITH ENLARGE PREVIEWS) */}
+      {/* ------------------------------------------------------------- */}
+      {showSaveCropChoiceModal && (
+        <div className="fixed inset-0 z-[90] bg-black/85 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl border-2 border-gray-300 max-h-[90vh] flex flex-col">
+            <div className="border-b pb-2 flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-black text-gray-900">
+                  Select Previous Crops to Replace
+                </h3>
+                <p className="text-xs text-gray-500">
+                  You are saving <strong>{croppedTray.length} new ID card(s)</strong>.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSaveCropChoiceModal(false)}
+                className="text-gray-400 hover:text-black font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600">
+              Click on any previous crop below that you want to <strong>replace/overwrite</strong> with your new crop(s). Unselected cards will be kept safe.
+            </p>
+
+            {/* List of previously cropped images from this PDF */}
+            <div className="flex-1 overflow-y-auto p-2 border rounded-xl bg-gray-50 space-y-2">
+              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide block mb-1">
+                Previously Cropped Cards from this PDF:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {getExistingCropsForActivePdf().map((oldUrl, oIdx) => {
+                  const isSelectedForReplace = selectedOldCropsToReplace.has(oldUrl);
+                  const displayOldUrl = getMediaDisplayUrl(oldUrl);
+
+                  return (
+                    <div
+                      key={oIdx}
+                      onClick={() => handleToggleOldCropSelection(oldUrl)}
+                      className={`relative border-2 rounded-xl p-2 cursor-pointer transition flex flex-col justify-between ${
+                        isSelectedForReplace
+                          ? "border-red-500 bg-red-50/80 ring-2 ring-red-400"
+                          : "border-gray-200 bg-white hover:border-purple-300"
+                      }`}
+                    >
+                      <div className="relative h-24 w-full bg-gray-100 rounded overflow-hidden">
+                        <img
+                          src={displayOldUrl}
+                          alt="Previous Crop"
+                          className="w-full h-full object-contain"
+                        />
+                        {/* ENLARGE PREVIEW BUTTON */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveLightboxImg(displayOldUrl);
+                          }}
+                          className="absolute bottom-1 right-1 bg-black/75 hover:bg-black text-white px-1.5 py-0.5 rounded text-[9px] font-bold shadow"
+                        >
+                          🔍 Enlarge
+                        </button>
+                      </div>
+
+                      <div className="mt-2 text-center">
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-block ${
+                            isSelectedForReplace
+                              ? "bg-red-600 text-white"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {isSelectedForReplace ? "✕ Will Replace" : "✓ Keep Card"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bottom Decision Options */}
+            <div className="space-y-2 pt-2 border-t">
+              <div className="flex flex-col sm:flex-row justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSaveCropChoiceModal(false)}
+                  disabled={isSavingCrops}
+                  className="px-4 py-2 border font-bold text-xs rounded-xl"
+                >
+                  Back to Cropper
+                </button>
+
+                {/* Option 1: Append without replacing anything */}
+                <button
+                  type="button"
+                  onClick={() => handleExecuteSaveCrops([])}
+                  disabled={isSavingCrops}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow"
+                >
+                  Keep All & Add as New ({croppedTray.length})
+                </button>
+
+                {/* Option 2: Replace only selected old crops */}
+                <button
+                  type="button"
+                  onClick={() => handleExecuteSaveCrops(Array.from(selectedOldCropsToReplace))}
+                  disabled={isSavingCrops || selectedOldCropsToReplace.size === 0}
+                  className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white font-black text-xs rounded-xl shadow disabled:opacity-40"
+                >
+                  Replace Selected ({selectedOldCropsToReplace.size}) & Save New ({croppedTray.length})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WHATSAPP WEB STYLE CHAT MODAL */}
       {isChatModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 md:p-4 no-print">
           <div className="bg-white w-full h-full md:rounded-2xl shadow-2xl flex overflow-hidden border border-gray-300">
@@ -1669,7 +2264,7 @@ export default function WeddingRsvpPage() {
                   </div>
                 </div>
 
-                {/* Messages Feed (Scroll Area) */}
+                {/* Messages Feed */}
                 <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.map((msg) => {
                     const isOutbound = msg.direction === "outbound";
@@ -1695,90 +2290,89 @@ export default function WeddingRsvpPage() {
                             </p>
                           )}
 
-                {/* Media / Audio / PDF Attachments */}
-  {msg.mediaUrls && msg.mediaUrls.length > 0 && (
-    <div className="space-y-2 pt-1">
-      {msg.mediaUrls.map((url: string, idx: number) => {
-        const isAudio = url.includes(".mp4") || url.includes(".m4a") || url.includes("audio");
-        const isPdf = isPdfFile(url, msg.body);
-        const isVideo = url.includes("video");
+                          {/* Media / Audio / PDF Attachments */}
+                          {msg.mediaUrls && msg.mediaUrls.length > 0 && (
+                            <div className="space-y-2 pt-1">
+                              {msg.mediaUrls.map((url: string, idx: number) => {
+                                const isAudio = url.includes(".mp4") || url.includes(".m4a") || url.includes("audio");
+                                const isPdf = isPdfFile(url, msg.body);
+                                const isVideo = url.includes("video");
+                                const resolvedUrl = getMediaDisplayUrl(url);
 
-        if (isAudio) {
-          return (
-            <div key={idx} className="bg-white/80 p-2 rounded-lg border">
-              <span className="text-[10px] font-bold text-gray-600 block mb-1">
-                🎤 Voice Note
-              </span>
-              <audio controls className="w-64 h-8" src={url} />
-            </div>
-          );
-        }
+                                if (isAudio) {
+                                  return (
+                                    <div key={idx} className="bg-white/80 p-2 rounded-lg border">
+                                      <span className="text-[10px] font-bold text-gray-600 block mb-1">
+                                        🎤 Voice Note
+                                      </span>
+                                      <audio controls className="w-64 h-8" src={resolvedUrl} />
+                                    </div>
+                                  );
+                                }
 
-        if (isVideo) {
-          return (
-            <video key={idx} controls className="max-w-xs rounded-lg border max-h-60">
-              <source src={url} />
-            </video>
-          );
-        }
+                                if (isVideo) {
+                                  return (
+                                    <video key={idx} controls className="max-w-xs rounded-lg border max-h-60">
+                                      <source src={resolvedUrl} />
+                                    </video>
+                                  );
+                                }
 
-        if (isPdf) {
-          const displayName = msg.body?.toLowerCase().includes(".pdf")
-            ? msg.body
-            : "Government ID (PDF Document)";
+                                if (isPdf) {
+                                  const displayName = msg.body?.toLowerCase().includes(".pdf")
+                                    ? msg.body
+                                    : "Government ID (PDF Document)";
 
-          return (
-            <div
-              key={idx}
-              className="bg-white p-3 rounded-xl border border-gray-300 shadow-sm flex items-center justify-between gap-3 max-w-sm"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="text-3xl flex-shrink-0">📄</span>
-                <div className="min-w-0">
-                  <strong className="text-xs text-gray-900 block truncate font-bold">
-                    {displayName}
-                  </strong>
-                  <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                    PDF Document
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                {/* 1. Preview button: loads through the proxy */}
-                <button
-                  type="button"
-                  onClick={() => setActiveLightboxDoc(getMediaDisplayUrl(url))}
-                  className="text-xs font-black text-blue-700 hover:bg-blue-100 bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition"
-                >
-                  Preview
-                </button>
-                {/* 2. Open in New Tab icon */}
-                <a
-                  href={getMediaDisplayUrl(url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-black text-gray-700 hover:bg-gray-100 bg-gray-50 px-2.5 py-1.5 rounded-lg border transition"
-                  title="Open in new tab"
-                >
-                  ↗
-                </a>
-              </div>
-            </div>
-          );
-        }
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="bg-white p-3 rounded-xl border border-gray-300 shadow-sm flex items-center justify-between gap-3 max-w-sm"
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <span className="text-3xl flex-shrink-0">📄</span>
+                                        <div className="min-w-0">
+                                          <strong className="text-xs text-gray-900 block truncate font-bold">
+                                            {displayName}
+                                          </strong>
+                                          <span className="text-[10px] text-gray-500 font-semibold uppercase">
+                                            PDF Document
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveLightboxDoc(resolvedUrl)}
+                                          className="text-xs font-black text-blue-700 hover:bg-blue-100 bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition"
+                                        >
+                                          Preview
+                                        </button>
+                                        <a
+                                          href={resolvedUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-xs font-black text-gray-700 hover:bg-gray-100 bg-gray-50 px-2.5 py-1.5 rounded-lg border transition"
+                                          title="Open in new tab"
+                                        >
+                                          ↗
+                                        </a>
+                                      </div>
+                                    </div>
+                                  );
+                                }
 
-        return (
-          <img
-            key={idx}
-            src={url}
-            alt="Attachment"
-            onClick={() => setActiveLightboxImg(url)}
-            className="max-w-xs max-h-64 object-cover rounded-lg border cursor-zoom-in"
-          />
-        );
-      })}
-    </div>
-  )}
+                                return (
+                                  <img
+                                    key={idx}
+                                    src={resolvedUrl}
+                                    alt="Attachment"
+                                    onClick={() => setActiveLightboxImg(resolvedUrl)}
+                                    className="max-w-xs max-h-64 object-cover rounded-lg border cursor-zoom-in"
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
 
                           <div className="flex items-center justify-end gap-1 text-[10px] text-gray-400 font-mono">
                             <span>
@@ -1791,7 +2385,6 @@ export default function WeddingRsvpPage() {
                     );
                   })}
 
-                  {/* Scroll Target Div */}
                   <div ref={messagesEndRef} className="h-1" />
 
                   {chatMessages.length === 0 && (
@@ -2079,11 +2672,11 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* Lightbox Modal (Images) */}
+      {/* Lightbox Modal (Images) - Highest Z-Index so it appears over all modals */}
       {activeLightboxImg && (
         <div
           onClick={() => setActiveLightboxImg(null)}
-          className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 cursor-zoom-out no-print"
+          className="fixed inset-0 z-[120] bg-black/90 flex flex-col items-center justify-center p-4 cursor-zoom-out no-print"
         >
           <button
             onClick={() => setActiveLightboxImg(null)}
@@ -2105,11 +2698,28 @@ export default function WeddingRsvpPage() {
           <div className="bg-white w-full max-w-4xl h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl">
             <div className="bg-gray-900 text-white px-5 py-3 flex justify-between items-center">
               <span className="font-black text-sm">📄 Government ID PDF Preview</span>
-              <button onClick={() => setActiveLightboxDoc(null)} className="text-white hover:text-red-400 font-black text-lg">
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <a
+                  href={activeLightboxDoc}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-bold"
+                >
+                  Open in New Tab ↗
+                </a>
+                <button
+                  onClick={() => setActiveLightboxDoc(null)}
+                  className="text-white hover:text-red-400 font-black text-lg px-2"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-            <iframe src={activeLightboxDoc} className="w-full flex-1 border-0" title="PDF ID Viewer" />
+            <iframe
+              src={activeLightboxDoc}
+              className="w-full flex-1 border-0"
+              title="PDF ID Viewer"
+            />
           </div>
         </div>
       )}
@@ -2117,10 +2727,26 @@ export default function WeddingRsvpPage() {
       {/* PRINT-OPTIMIZED CSS */}
       <style jsx global>{`
         @media print {
-          body { background: white !important; font-size: 11pt !important; }
-          .no-print { display: none !important; }
-          .print-only { display: block !important; }
-          .page-break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
+          body {
+            background: white !important;
+            font-size: 10pt !important;
+            color: black !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-only {
+            display: block !important;
+            padding: 0 !important;
+          }
+          .page-break-inside-avoid {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          @page {
+            size: A4 portrait;
+            margin: 12mm 10mm 12mm 10mm;
+          }
         }
       `}</style>
     </div>
