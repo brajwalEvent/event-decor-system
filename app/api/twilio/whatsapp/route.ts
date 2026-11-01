@@ -3,7 +3,6 @@ import { db, storage } from "../../../../lib/firebase";
 import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc, query, where, limit } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
-// Set maximum duration for Next.js serverless function (up to 60s if supported by plan)
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
@@ -35,10 +34,9 @@ export async function POST(req: Request) {
 
     const tenDigitPhone = cleanSenderPhone.slice(-10);
 
-    // 1. FAST GUEST MATCHING (< 200ms)
+    // 1. FAST GUEST MATCHING (< 150ms)
     let matchedGuestDoc: any = null;
 
-    // Check by cleanPhone
     try {
       const qClean = query(collectionGroup(db, "rsvps"), where("cleanPhone", "==", tenDigitPhone), limit(1));
       const snapClean = await getDocs(qClean);
@@ -47,7 +45,6 @@ export async function POST(req: Request) {
       // ignore
     }
 
-    // Check by standard phone variants
     if (!matchedGuestDoc) {
       for (const candidate of [tenDigitPhone, cleanSenderPhone, `+91${tenDigitPhone}`, `+${cleanSenderPhone}`]) {
         try {
@@ -63,7 +60,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Fallback scan if not indexed yet
+    // Fallback scan if indexes are not yet built
     if (!matchedGuestDoc) {
       const allRsvpsSnap = await getDocs(collectionGroup(db, "rsvps"));
       for (const d of allRsvpsSnap.docs) {
@@ -80,33 +77,63 @@ export async function POST(req: Request) {
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // 2. EXTRACT MEDIA URLS INSTANTLY (Prevents 15-second timeout)
-    const initialMediaUrls: string[] = [];
-    const mediaItems: { url: string; contentType: string }[] = [];
+    // 2. DOWNLOAD FROM TWILIO & UPLOAD TO FIREBASE STORAGE INLINE (~1.2s)
+    const finalizedMediaUrls: string[] = [];
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const authHeader = "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
 
     for (let i = 0; i < numMedia; i++) {
       const mediaUrl = params.get(`MediaUrl${i}`);
       const contentType = (params.get(`MediaContentType${i}`) || "application/pdf").toLowerCase();
+
       if (mediaUrl) {
-        initialMediaUrls.push(mediaUrl);
-        mediaItems.push({ url: mediaUrl, contentType });
+        try {
+          const res = await fetch(mediaUrl, { headers: { Authorization: authHeader } });
+          if (res.ok) {
+            const arrayBuffer = await res.arrayBuffer();
+            const isPdf = contentType.includes("pdf") || rawBody.toLowerCase().includes(".pdf");
+            const ext = isPdf
+              ? "pdf"
+              : contentType.includes("video")
+              ? "mp4"
+              : contentType.includes("png")
+              ? "png"
+              : "jpg";
+
+            const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.${ext}`;
+            const storageRef = ref(storage, fileName);
+
+            await uploadBytes(storageRef, new Uint8Array(arrayBuffer), {
+              contentType: isPdf ? "application/pdf" : contentType,
+            });
+
+            const firebaseDownloadUrl = await getDownloadURL(storageRef);
+            finalizedMediaUrls.push(firebaseDownloadUrl);
+          } else {
+            finalizedMediaUrls.push(mediaUrl);
+          }
+        } catch (uploadErr) {
+          console.error("[Storage Upload Error]:", uploadErr);
+          finalizedMediaUrls.push(mediaUrl);
+        }
       }
     }
 
     let messageBody = rawBody.trim();
-    if (!messageBody && initialMediaUrls.length > 0) {
-      const isPdf = mediaItems.some((m) => m.contentType.includes("pdf"));
+    if (!messageBody && finalizedMediaUrls.length > 0) {
+      const isPdf = finalizedMediaUrls.some((u) => u.toLowerCase().includes(".pdf"));
       messageBody = isPdf ? "📄 Sent a PDF Document" : "📷 Sent a Photo/ID";
     }
 
-    // 3. WRITE MESSAGE TO FIRESTORE IMMEDIATELY (Instantly appears in the live chat!)
+    // 3. WRITE TO FIRESTORE
     const guestData = matchedGuestDoc.data();
     const guestDocPath = matchedGuestDoc.ref.path;
 
-    const messageRef = await addDoc(collection(db, guestDocPath, "messages"), {
+    await addDoc(collection(db, guestDocPath, "messages"), {
       direction: "inbound",
       body: messageBody || "Replied on WhatsApp",
-      mediaUrls: initialMediaUrls,
+      mediaUrls: finalizedMediaUrls,
       sid: messageSid,
       status: "delivered",
       timestamp: new Date().toISOString(),
@@ -132,61 +159,18 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. UPDATE GUEST DOCUMENT
+    // 5. UPDATE GUEST DOCUMENT WITH PERMANENT ID URLS
     const currentIds = guestData.idCardUrls || [];
     await updateDoc(doc(db, guestDocPath), {
-      idCardUrls: [...currentIds, ...initialMediaUrls],
+      idCardUrls: [...currentIds, ...finalizedMediaUrls],
       lastMessage: messageBody || "Replied on WhatsApp",
       lastMessageAt: new Date().toISOString(),
       lastGuestInboundAt: new Date().toISOString(),
       hasUnreadMessages: true,
       cleanPhone: tenDigitPhone,
-      ...(initialMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
+      ...(finalizedMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
     });
 
-    // 6. ASYNCHRONOUS FIREBASE STORAGE MIRRORING (Runs in background without delaying Twilio)
-    if (mediaItems.length > 0) {
-      (async () => {
-        try {
-          const accountSid = process.env.TWILIO_ACCOUNT_SID;
-          const authToken = process.env.TWILIO_AUTH_TOKEN;
-          const authHeader = "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-          const firebaseStorageUrls: string[] = [];
-
-          for (let i = 0; i < mediaItems.length; i++) {
-            const item = mediaItems[i];
-            const res = await fetch(item.url, { headers: { Authorization: authHeader } });
-            if (res.ok) {
-              const arrayBuffer = await res.arrayBuffer();
-              const ext = item.contentType.includes("pdf") ? "pdf" : "jpg";
-              const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.${ext}`;
-              const storageRef = ref(storage, fileName);
-
-              await uploadBytes(storageRef, new Uint8Array(arrayBuffer), { contentType: item.contentType });
-              const firebaseDownloadUrl = await getDownloadURL(storageRef);
-              firebaseStorageUrls.push(firebaseDownloadUrl);
-            }
-          }
-
-          if (firebaseStorageUrls.length > 0) {
-            // Replace Twilio temporary media links with permanent Firebase URLs
-            await updateDoc(doc(db, guestDocPath, "messages", messageRef.id), {
-              mediaUrls: firebaseStorageUrls,
-            });
-
-            // Update parent guest idCardUrls list with permanent links
-            const freshGuestSnap = await getDocs(query(collection(db, guestDocPath)));
-            await updateDoc(doc(db, guestDocPath), {
-              idCardUrls: firebaseStorageUrls,
-            });
-          }
-        } catch (bgErr) {
-          console.error("[Background Storage Upload Error]:", bgErr);
-        }
-      })();
-    }
-
-    // Respond immediately to Twilio within < 1 second!
     if (replyText) {
       const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
       return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
@@ -194,7 +178,7 @@ export async function POST(req: Request) {
 
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   } catch (err: any) {
-    console.error("[Twilio Inbound Webhook Fatal]:", err);
+    console.error("[Twilio Inbound Fatal]:", err);
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   }
 }

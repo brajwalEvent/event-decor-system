@@ -174,7 +174,17 @@ export default function WeddingRsvpPage() {
     }
   }, [isChatModalOpen, activeChatGuest?.id]);
 
-  const isPdfFile = (url: string) => url.toLowerCase().includes(".pdf");
+  // Smart PDF detection (checks both URL and message filename text)
+  const isPdfFile = (url: string, msgBody?: string) => {
+    const u = (url || "").toLowerCase();
+    const b = (msgBody || "").toLowerCase();
+    return (
+      u.includes(".pdf") ||
+      u.includes("application/pdf") ||
+      b.endsWith(".pdf") ||
+      b.includes(".pdf")
+    );
+  };
 
   const cleanPhoneNumber = (val: any): string => {
     if (!val) return "";
@@ -1676,65 +1686,88 @@ export default function WeddingRsvpPage() {
                             </p>
                           )}
 
-                          {msg.mediaUrls && msg.mediaUrls.length > 0 && (
-                            <div className="space-y-2 pt-1">
-                              {msg.mediaUrls.map((url: string, idx: number) => {
-                                const isAudio = url.includes(".mp4") || url.includes(".m4a") || url.includes("audio");
-                                const isPdf = isPdfFile(url);
-                                const isVideo = url.includes("video");
+                {/* Media / Audio / PDF Attachments */}
+  {msg.mediaUrls && msg.mediaUrls.length > 0 && (
+    <div className="space-y-2 pt-1">
+      {msg.mediaUrls.map((url: string, idx: number) => {
+        const isAudio = url.includes(".mp4") || url.includes(".m4a") || url.includes("audio");
+        const isPdf = isPdfFile(url, msg.body);
+        const isVideo = url.includes("video");
 
-                                if (isAudio) {
-                                  return (
-                                    <div key={idx} className="bg-white/80 p-2 rounded-lg border">
-                                      <span className="text-[10px] font-bold text-gray-600 block mb-1">
-                                        🎤 Voice Note
-                                      </span>
-                                      <audio controls className="w-64 h-8" src={url} />
-                                    </div>
-                                  );
-                                }
+        if (isAudio) {
+          return (
+            <div key={idx} className="bg-white/80 p-2 rounded-lg border">
+              <span className="text-[10px] font-bold text-gray-600 block mb-1">
+                🎤 Voice Note
+              </span>
+              <audio controls className="w-64 h-8" src={url} />
+            </div>
+          );
+        }
 
-                                if (isVideo) {
-                                  return (
-                                    <video key={idx} controls className="max-w-xs rounded-lg border max-h-60">
-                                      <source src={url} />
-                                    </video>
-                                  );
-                                }
+        if (isVideo) {
+          return (
+            <video key={idx} controls className="max-w-xs rounded-lg border max-h-60">
+              <source src={url} />
+            </video>
+          );
+        }
 
-                                if (isPdf) {
-                                  return (
-                                    <div key={idx} className="bg-white p-2.5 rounded-lg border flex items-center justify-between gap-3">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-2xl">📄</span>
-                                        <div>
-                                          <strong className="text-xs block text-gray-900">PDF Document</strong>
-                                          <span className="text-[10px] text-gray-500">Government ID / Aadhaar</span>
-                                        </div>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => setActiveLightboxDoc(url)}
-                                        className="text-xs font-black text-blue-700 hover:underline bg-blue-50 px-2 py-1 rounded"
-                                      >
-                                        Open PDF
-                                      </button>
-                                    </div>
-                                  );
-                                }
+        if (isPdf) {
+          const displayName = msg.body?.toLowerCase().includes(".pdf")
+            ? msg.body
+            : "Government ID (PDF Document)";
 
-                                return (
-                                  <img
-                                    key={idx}
-                                    src={url}
-                                    alt="Attachment"
-                                    onClick={() => setActiveLightboxImg(url)}
-                                    className="max-w-xs max-h-64 object-cover rounded-lg border cursor-zoom-in"
-                                  />
-                                );
-                              })}
-                            </div>
-                          )}
+          return (
+            <div
+              key={idx}
+              className="bg-white p-3 rounded-xl border border-gray-300 shadow-sm flex items-center justify-between gap-3 max-w-sm"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-3xl flex-shrink-0">📄</span>
+                <div className="min-w-0">
+                  <strong className="text-xs text-gray-900 block truncate font-bold">
+                    {displayName}
+                  </strong>
+                  <span className="text-[10px] text-gray-500 font-semibold uppercase">
+                    PDF Document
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveLightboxDoc(url)}
+                  className="text-xs font-black text-blue-700 hover:bg-blue-100 bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition"
+                >
+                  Preview
+                </button>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-black text-gray-700 hover:bg-gray-100 bg-gray-50 px-2.5 py-1.5 rounded-lg border transition"
+                  title="Open in new tab"
+                >
+                  ↗
+                </a>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <img
+            key={idx}
+            src={url}
+            alt="Attachment"
+            onClick={() => setActiveLightboxImg(url)}
+            className="max-w-xs max-h-64 object-cover rounded-lg border cursor-zoom-in"
+          />
+        );
+      })}
+    </div>
+  )}
 
                           <div className="flex items-center justify-end gap-1 text-[10px] text-gray-400 font-mono">
                             <span>
