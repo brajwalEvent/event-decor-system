@@ -3,6 +3,9 @@ import { db, storage } from "../../../../lib/firebase";
 import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc, query, where, limit } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
+// Set maximum duration for Next.js serverless function (up to 60s if supported by plan)
+export const maxDuration = 60;
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get("hub.mode");
@@ -21,7 +24,7 @@ export async function POST(req: Request) {
     const params = new URLSearchParams(textData);
 
     const from = params.get("From") || "";
-    const body = params.get("Body") || "";
+    const rawBody = params.get("Body") || "";
     const messageSid = params.get("MessageSid") || "";
     const numMedia = parseInt(params.get("NumMedia") || "0", 10);
     const cleanSenderPhone = from.replace("whatsapp:", "").replace(/[^0-9]/g, "");
@@ -32,140 +35,166 @@ export async function POST(req: Request) {
 
     const tenDigitPhone = cleanSenderPhone.slice(-10);
 
-    // 1. Download incoming attachments and upload to Firebase Storage (Recognizes both Images and PDFs)
-    const finalizedMediaUrls: string[] = [];
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const authHeader = "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+    // 1. FAST GUEST MATCHING (< 200ms)
+    let matchedGuestDoc: any = null;
 
-    for (let i = 0; i < numMedia; i++) {
-      const mediaUrl = params.get(`MediaUrl${i}`);
-      const contentType = (params.get(`MediaContentType${i}`) || "image/jpeg").toLowerCase();
+    // Check by cleanPhone
+    try {
+      const qClean = query(collectionGroup(db, "rsvps"), where("cleanPhone", "==", tenDigitPhone), limit(1));
+      const snapClean = await getDocs(qClean);
+      if (!snapClean.empty) matchedGuestDoc = snapClean.docs[0];
+    } catch (e) {
+      // ignore
+    }
 
-      if (mediaUrl) {
+    // Check by standard phone variants
+    if (!matchedGuestDoc) {
+      for (const candidate of [tenDigitPhone, cleanSenderPhone, `+91${tenDigitPhone}`, `+${cleanSenderPhone}`]) {
         try {
-          const response = await fetch(mediaUrl, {
-            headers: { Authorization: authHeader },
-          });
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-
-          const ext = contentType.includes("pdf")
-            ? "pdf"
-            : contentType.includes("video")
-            ? "mp4"
-            : contentType.includes("png")
-            ? "png"
-            : "jpg";
-
-          const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.${ext}`;
-          const storageRef = ref(storage, fileName);
-          await uploadBytes(storageRef, buffer, { contentType });
-
-          const publicUrl = await getDownloadURL(storageRef);
-          finalizedMediaUrls.push(publicUrl);
+          const qDirect = query(collectionGroup(db, "rsvps"), where("phone", "==", candidate), limit(1));
+          const snapDirect = await getDocs(qDirect);
+          if (!snapDirect.empty) {
+            matchedGuestDoc = snapDirect.docs[0];
+            break;
+          }
         } catch (e) {
-          console.error("Failed to upload media:", e);
+          // ignore
         }
       }
     }
 
-    // 2. TARGETED QUERY: Look up guest by indexed phone candidates (Eliminates full database scans)
-    let matchedGuestDoc: any = null;
-
-    // Search by clean 10-digit phone
-    const qClean = query(
-      collectionGroup(db, "rsvps"),
-      where("cleanPhone", "==", tenDigitPhone),
-      limit(1)
-    );
-    const snapClean = await getDocs(qClean);
-
-    if (!snapClean.empty) {
-      matchedGuestDoc = snapClean.docs[0];
-    } else {
-      // Fallback: search standard phone field variants
-      const phoneVariants = [
-        tenDigitPhone,
-        `+91${tenDigitPhone}`,
-        `91${tenDigitPhone}`,
-        cleanSenderPhone,
-        `+${cleanSenderPhone}`,
-      ];
-
-      const qPhone = query(
-        collectionGroup(db, "rsvps"),
-        where("phone", "in", phoneVariants),
-        limit(1)
-      );
-      const snapPhone = await getDocs(qPhone);
-      if (!snapPhone.empty) {
-        matchedGuestDoc = snapPhone.docs[0];
+    // Fallback scan if not indexed yet
+    if (!matchedGuestDoc) {
+      const allRsvpsSnap = await getDocs(collectionGroup(db, "rsvps"));
+      for (const d of allRsvpsSnap.docs) {
+        const guestPhoneClean = (d.data().phone || "").replace(/[^0-9]/g, "");
+        if (guestPhoneClean.slice(-10) === tenDigitPhone) {
+          matchedGuestDoc = d;
+          break;
+        }
       }
     }
 
-    if (matchedGuestDoc) {
-      const guestData = matchedGuestDoc.data();
-      const currentIds = guestData.idCardUrls || [];
-      const updatedIds = [...currentIds, ...finalizedMediaUrls];
+    if (!matchedGuestDoc) {
+      console.warn(`[Twilio Inbound] No guest record matched phone ${cleanSenderPhone}`);
+      return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
+    }
 
-      // Save incoming message in chat history
-      await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
-        direction: "inbound",
-        body: body.trim(),
-        mediaUrls: finalizedMediaUrls,
-        sid: messageSid,
+    // 2. EXTRACT MEDIA URLS INSTANTLY (Prevents 15-second timeout)
+    const initialMediaUrls: string[] = [];
+    const mediaItems: { url: string; contentType: string }[] = [];
+
+    for (let i = 0; i < numMedia; i++) {
+      const mediaUrl = params.get(`MediaUrl${i}`);
+      const contentType = (params.get(`MediaContentType${i}`) || "application/pdf").toLowerCase();
+      if (mediaUrl) {
+        initialMediaUrls.push(mediaUrl);
+        mediaItems.push({ url: mediaUrl, contentType });
+      }
+    }
+
+    let messageBody = rawBody.trim();
+    if (!messageBody && initialMediaUrls.length > 0) {
+      const isPdf = mediaItems.some((m) => m.contentType.includes("pdf"));
+      messageBody = isPdf ? "📄 Sent a PDF Document" : "📷 Sent a Photo/ID";
+    }
+
+    // 3. WRITE MESSAGE TO FIRESTORE IMMEDIATELY (Instantly appears in the live chat!)
+    const guestData = matchedGuestDoc.data();
+    const guestDocPath = matchedGuestDoc.ref.path;
+
+    const messageRef = await addDoc(collection(db, guestDocPath, "messages"), {
+      direction: "inbound",
+      body: messageBody || "Replied on WhatsApp",
+      mediaUrls: initialMediaUrls,
+      sid: messageSid,
+      status: "delivered",
+      timestamp: new Date().toISOString(),
+      senderName: guestData.name || "Guest",
+    });
+
+    // 4. 2-HOUR AUTO-REPLY LOGIC
+    const lastInboundTime = guestData.lastGuestInboundAt ? new Date(guestData.lastGuestInboundAt).getTime() : 0;
+    const now = Date.now();
+    const shouldSendAutoReply = !lastInboundTime || now - lastInboundTime > 2 * 60 * 60 * 1000;
+
+    let replyText = "";
+    if (shouldSendAutoReply) {
+      replyText = "Namaste, We have received your message and our team will get back to you ASAP. Regards, Team Brajwal";
+
+      await addDoc(collection(db, guestDocPath, "messages"), {
+        direction: "outbound",
+        body: replyText,
+        mediaUrls: [],
         status: "delivered",
         timestamp: new Date().toISOString(),
-        senderName: guestData.name || "Guest",
+        senderName: "Team Brajwal (Auto-Reply)",
       });
+    }
 
-      // 3. 2-Hour Auto-Reply Window Logic
-      const lastInboundTime = guestData.lastGuestInboundAt
-        ? new Date(guestData.lastGuestInboundAt).getTime()
-        : 0;
-      const now = Date.now();
-      const twoHoursInMs = 2 * 60 * 60 * 1000;
-      const shouldSendAutoReply = !lastInboundTime || now - lastInboundTime > twoHoursInMs;
+    // 5. UPDATE GUEST DOCUMENT
+    const currentIds = guestData.idCardUrls || [];
+    await updateDoc(doc(db, guestDocPath), {
+      idCardUrls: [...currentIds, ...initialMediaUrls],
+      lastMessage: messageBody || "Replied on WhatsApp",
+      lastMessageAt: new Date().toISOString(),
+      lastGuestInboundAt: new Date().toISOString(),
+      hasUnreadMessages: true,
+      cleanPhone: tenDigitPhone,
+      ...(initialMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
+    });
 
-      let replyText = "";
-      if (shouldSendAutoReply) {
-        replyText = "Namaste, We have received your message and our team will get back to you ASAP. Regards, Team Brajwal";
+    // 6. ASYNCHRONOUS FIREBASE STORAGE MIRRORING (Runs in background without delaying Twilio)
+    if (mediaItems.length > 0) {
+      (async () => {
+        try {
+          const accountSid = process.env.TWILIO_ACCOUNT_SID;
+          const authToken = process.env.TWILIO_AUTH_TOKEN;
+          const authHeader = "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+          const firebaseStorageUrls: string[] = [];
 
-        await addDoc(collection(db, matchedGuestDoc.ref.path, "messages"), {
-          direction: "outbound",
-          body: replyText,
-          mediaUrls: [],
-          status: "delivered",
-          timestamp: new Date().toISOString(),
-          senderName: "Team Brajwal (Auto-Reply)",
-        });
-      }
+          for (let i = 0; i < mediaItems.length; i++) {
+            const item = mediaItems[i];
+            const res = await fetch(item.url, { headers: { Authorization: authHeader } });
+            if (res.ok) {
+              const arrayBuffer = await res.arrayBuffer();
+              const ext = item.contentType.includes("pdf") ? "pdf" : "jpg";
+              const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.${ext}`;
+              const storageRef = ref(storage, fileName);
 
-      // Update Guest Document
-      await updateDoc(doc(db, matchedGuestDoc.ref.path), {
-        idCardUrls: updatedIds,
-        lastMessage:
-          body.trim() ||
-          (finalizedMediaUrls.length > 0
-            ? `📎 Received ${finalizedMediaUrls.length} file(s)`
-            : "Replied on WhatsApp"),
-        lastMessageAt: new Date().toISOString(),
-        lastGuestInboundAt: new Date().toISOString(),
-        hasUnreadMessages: true,
-        cleanPhone: tenDigitPhone, // backfills clean phone for future lookups
-        ...(finalizedMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
-      });
+              await uploadBytes(storageRef, new Uint8Array(arrayBuffer), { contentType: item.contentType });
+              const firebaseDownloadUrl = await getDownloadURL(storageRef);
+              firebaseStorageUrls.push(firebaseDownloadUrl);
+            }
+          }
 
-      if (replyText) {
-        const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
-        return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
-      }
+          if (firebaseStorageUrls.length > 0) {
+            // Replace Twilio temporary media links with permanent Firebase URLs
+            await updateDoc(doc(db, guestDocPath, "messages", messageRef.id), {
+              mediaUrls: firebaseStorageUrls,
+            });
+
+            // Update parent guest idCardUrls list with permanent links
+            const freshGuestSnap = await getDocs(query(collection(db, guestDocPath)));
+            await updateDoc(doc(db, guestDocPath), {
+              idCardUrls: firebaseStorageUrls,
+            });
+          }
+        } catch (bgErr) {
+          console.error("[Background Storage Upload Error]:", bgErr);
+        }
+      })();
+    }
+
+    // Respond immediately to Twilio within < 1 second!
+    if (replyText) {
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
+      return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
     }
 
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
-  } catch (err) {
-    console.error("Webhook Error:", err);
+  } catch (err: any) {
+    console.error("[Twilio Inbound Webhook Fatal]:", err);
     return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
   }
 }
