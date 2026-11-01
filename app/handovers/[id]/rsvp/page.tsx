@@ -185,6 +185,15 @@ export default function WeddingRsvpPage() {
       b.includes(".pdf")
     );
   };
+  
+   // Converts raw Twilio media URLs through your proxy with credentials
+  const getMediaDisplayUrl = (url: string) => {
+    if (!url) return "";
+    if (url.includes("api.twilio.com")) {
+      return `/api/proxy-image?url=${encodeURIComponent(url)}`;
+    }
+    return url;
+  };
 
   const cleanPhoneNumber = (val: any): string => {
     if (!val) return "";
@@ -1735,15 +1744,17 @@ export default function WeddingRsvpPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
+                {/* 1. Preview button: loads through the proxy */}
                 <button
                   type="button"
-                  onClick={() => setActiveLightboxDoc(url)}
+                  onClick={() => setActiveLightboxDoc(getMediaDisplayUrl(url))}
                   className="text-xs font-black text-blue-700 hover:bg-blue-100 bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition"
                 >
                   Preview
                 </button>
+                {/* 2. Open in New Tab icon */}
                 <a
-                  href={url}
+                  href={getMediaDisplayUrl(url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs font-black text-gray-700 hover:bg-gray-100 bg-gray-50 px-2.5 py-1.5 rounded-lg border transition"
