@@ -343,12 +343,18 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         createdByEmail: user.email || "Unknown",
       });
 
-      // Valid action "UPDATE" to satisfy TypeScript audit log constraints
+      // 5. Audit Log with REQUIRED newData property
       await recordAuditLog(user, {
         module: "GENERAL_LEDGER",
         action: "UPDATE",
         targetId: selectedFloat.id,
         targetName: selectedFloat.staffName,
+        newData: {
+          transferredAmount: parsedAmount,
+          recipientStaff: targetFloat.staffName,
+          sourceRemainingBalance: sourceNewBalance,
+          recipientNewBalance: targetNewBalance,
+        },
         notes: `[TRANSFER] Transferred ₹${parsedAmount} cash float from ${selectedFloat.staffName} to ${targetFloat.staffName}.`,
       });
 
