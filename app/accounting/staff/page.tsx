@@ -460,6 +460,7 @@ export default function StaffAccountingPage(): React.ReactElement {
   // Submit Edit Staff Account (Super Admin Only)
   const handleUpdateStaffAccount = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return; // 👈 1. Guards against null
     if (!isSuperAdmin || isReadOnlyViewer) {
       alert("Unauthorized: Only Super Admins can modify staff account parameters.");
       return;
@@ -478,7 +479,7 @@ export default function StaffAccountingPage(): React.ReactElement {
         updatedFields
       );
 
-      await recordAuditLog(user, {
+      await recordAuditLog(user!, { // 👈 2. user! asserts non-null
         module: "STAFF_LEDGER",
         action: "UPDATE",
         targetId: selectedStaff.staffUid,
