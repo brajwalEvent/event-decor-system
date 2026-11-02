@@ -22,9 +22,15 @@ export default function AccountingPage(): React.ReactElement {
   // SSR hydration safety flag
   const [isMounted, setIsMounted] = useState(false);
 
+ // Hardcoded Read-Only Auditor / Viewer
+  const READ_ONLY_EMAIL = "itsmanisharora@gmail.com";
+  const isReadOnlyViewer =
+    user?.email?.toLowerCase().trim() === READ_ONLY_EMAIL.toLowerCase().trim();
+
   // Access rights (Cast safely to bypass strict enum mismatch)
   const isAccountant = (role as unknown as string) === "accountant";
-  const canAccess = isSuperAdmin || isAccountant || (role as unknown as string) === "admin";
+  const canAccess =
+    isSuperAdmin || isAccountant || (role as unknown as string) === "admin" || isReadOnlyViewer;
 
   // Data states
   const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>([]);
@@ -325,6 +331,11 @@ export default function AccountingPage(): React.ReactElement {
               <p className="text-[10px] uppercase font-mono font-black tracking-widest text-neutral-500">
                 BRAJWAL ERP / MASTER FINANCIAL INTELLIGENCE
               </p>
+              {isReadOnlyViewer && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold border border-blue-200">
+                  AUDITOR / READ-ONLY
+                </span>
+              )}
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight text-neutral-950 mt-1">
               Executive Accounting & Cashflow Analytics

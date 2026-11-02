@@ -27,14 +27,25 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   const { user, role, isSuperAdmin, loading } = useAuth();
   const router = useRouter();
 
+  // Hardcoded Read-Only Auditor / Viewer
+  const READ_ONLY_EMAIL = "itsmanisharora@gmail.com";
+  const isReadOnlyViewer =
+    user?.email?.toLowerCase().trim() === READ_ONLY_EMAIL.toLowerCase().trim();
+
   const isAccountant = (role as any) === "accountant";
-  const canAccess = isSuperAdmin || isAccountant || role === "admin";
+  const canAccess =
+    isSuperAdmin || isAccountant || role === "admin" || isReadOnlyViewer;
+
+  // Management Permission (Hidden from Read-Only Viewer)
+  const canManageFloats =
+    !isReadOnlyViewer && (isSuperAdmin || isAccountant || role === "admin");
 
   // Data States
   const [activeFloats, setActiveFloats] = useState<GeneralStaffFloat[]>([]);
   const [settledFloats, setSettledFloats] = useState<GeneralStaffFloat[]>([]);
   const [selectedFloat, setSelectedFloat] = useState<GeneralStaffFloat | null>(null);
   const [expenses, setExpenses] = useState<GeneralFloatExpense[]>([]);
+  const [fundingHistoryList, setFundingHistoryList] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [vendorsList, setVendorsList] = useState<any[]>([]);
   const [crmWeddings, setCrmWeddings] = useState<any[]>([]);
@@ -55,10 +66,10 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   const [showOpenFloatModal, setShowOpenFloatModal] = useState(false);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
-
-  // 🌟 Add these 2 new modal triggers:
   const [showFloatVendorPayModal, setShowFloatVendorPayModal] = useState(false);
   const [showFloatStaffPayModal, setShowFloatStaffPayModal] = useState(false);
+  const [showFundingHistoryModal, setShowFundingHistoryModal] = useState(false);
+  const [showTransferFloatModal, setShowTransferFloatModal] = useState(false);
 
   // States for Float Vendor Payment
   const [selectedVendorForFloatPay, setSelectedVendorForFloatPay] = useState<any | null>(null);
@@ -73,6 +84,12 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   const [floatStaffPayMode, setFloatStaffPayMode] = useState<PaymentMode>("Cash");
   const [floatStaffPayTxnType, setFloatStaffPayTxnType] = useState<"SALARY_CREDIT" | "ADVANCE_PAYMENT">("ADVANCE_PAYMENT");
   const [floatStaffPayRemarks, setFloatStaffPayRemarks] = useState("");
+
+  // States for Float-to-Float Transfer
+  const [targetTransferFloatId, setTargetTransferFloatId] = useState("");
+  const [transferAmount, setTransferAmount] = useState<number | "">("");
+  const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
+  const [transferRemarks, setTransferRemarks] = useState("");
 
   // Form: Open Float Account
   const [disburseStaffUid, setDisburseStaffUid] = useState("");
@@ -114,7 +131,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   }, [user, role, isSuperAdmin, loading, canAccess, router]);
 
-  // Load Data
+  // Load Initial Data
   const loadInitialData = async () => {
     try {
       setLoadingData(true);
@@ -135,11 +152,14 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         setSelectedFloat(active[0]);
       } else if (!selectedFloat && settled.length > 0) {
         setSelectedFloat(settled[0]);
+      } else if (selectedFloat) {
+        const refreshed = allFloats.find((f) => f.id === selectedFloat.id);
+        if (refreshed) setSelectedFloat(refreshed);
       }
 
       const userSnap = await getDocs(collection(db, "users"));
       setStaffList(userSnap.docs.map((d) => ({ uid: d.id, ...d.data() })));
-      // 🌟 Fetch Vendors for on-ground vendor payouts from float
+
       const vendorSnap = await getDocs(collection(db, "accounting_vendors")).catch(() => ({ docs: [] }));
       setVendorsList(vendorSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
@@ -201,13 +221,30 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   };
 
+  // Fetch Top-Ups and Internal Transfers for the selected float
+  const fetchFundingHistory = async (floatId: string) => {
+    try {
+      const q = query(
+        collection(db, "accounting_general_topups"),
+        where("floatId", "==", floatId)
+      );
+      const snap = await getDocs(q);
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+      setFundingHistoryList(list);
+    } catch (err) {
+      console.error("Error fetching funding history:", err);
+    }
+  };
+
   useEffect(() => {
     if (selectedFloat) {
       fetchFloatExpenses(selectedFloat.id);
+      fetchFundingHistory(selectedFloat.id);
     }
-  }, [selectedFloat]);
+  }, [selectedFloat?.id]);
 
-  // Helper: Construct PaymentDetails without undefined values
   const buildPaymentDetails = (
     mode: PaymentMode,
     fromAcc?: string,
@@ -236,15 +273,105 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     return details;
   };
 
-   // 🌟 Handler: Record Vendor Payment from Float
+  // Handler: Transfer Float Balance from One Staff to Another
+  const handleTransferFloat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canManageFloats || !user || !selectedFloat || !targetTransferFloatId || !transferAmount) return;
+
+    const parsedAmount = Number(transferAmount);
+
+    if (parsedAmount <= 0) {
+      alert("Transfer amount must be greater than zero.");
+      return;
+    }
+
+    if (parsedAmount > selectedFloat.currentFloatBalance) {
+      alert(`Insufficient float balance! ${selectedFloat.staffName} only has ₹${selectedFloat.currentFloatBalance.toLocaleString()} available.`);
+      return;
+    }
+
+    const targetFloat = activeFloats.find((f) => f.id === targetTransferFloatId);
+    if (!targetFloat) {
+      alert("Target staff float not found.");
+      return;
+    }
+
+    try {
+      // 1. Deduct from Source Float
+      const sourceNewBalance = selectedFloat.currentFloatBalance - parsedAmount;
+      const sourceNewTopUps = (selectedFloat.totalTopUpAmount || 0) - parsedAmount;
+      await updateDoc(doc(db, "accounting_general_floats", selectedFloat.id), {
+        currentFloatBalance: sourceNewBalance,
+        totalTopUpAmount: sourceNewTopUps,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 2. Add to Destination Float
+      const targetNewBalance = targetFloat.currentFloatBalance + parsedAmount;
+      const targetNewTopUps = (targetFloat.totalTopUpAmount || 0) + parsedAmount;
+      await updateDoc(doc(db, "accounting_general_floats", targetFloat.id), {
+        currentFloatBalance: targetNewBalance,
+        totalTopUpAmount: targetNewTopUps,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 3. Log Outgoing Transfer Record for Source
+      await addDoc(collection(db, "accounting_general_topups"), {
+        floatId: selectedFloat.id,
+        type: "TRANSFER_OUT",
+        amount: -parsedAmount,
+        date: transferDate,
+        paymentDetails: { mode: "Staff Float Transfer" },
+        remarks: `Transferred to ${targetFloat.staffName}: ${transferRemarks.trim() || "No remarks"}`,
+        relatedStaffName: targetFloat.staffName,
+        createdAt: new Date().toISOString(),
+        createdByUid: user.uid,
+        createdByEmail: user.email || "Unknown",
+      });
+
+      // 4. Log Incoming Transfer Record for Target
+      await addDoc(collection(db, "accounting_general_topups"), {
+        floatId: targetFloat.id,
+        type: "TRANSFER_IN",
+        amount: parsedAmount,
+        date: transferDate,
+        paymentDetails: { mode: "Staff Float Transfer" },
+        remarks: `Received from ${selectedFloat.staffName}: ${transferRemarks.trim() || "No remarks"}`,
+        relatedStaffName: selectedFloat.staffName,
+        createdAt: new Date().toISOString(),
+        createdByUid: user.uid,
+        createdByEmail: user.email || "Unknown",
+      });
+
+      await recordAuditLog(user, {
+        module: "GENERAL_LEDGER",
+        action: "TRANSFER",
+        targetId: selectedFloat.id,
+        targetName: selectedFloat.staffName,
+        notes: `Transferred ₹${parsedAmount} cash float from ${selectedFloat.staffName} to ${targetFloat.staffName}.`,
+      });
+
+      setShowTransferFloatModal(false);
+      setTransferAmount("");
+      setTransferRemarks("");
+      setTargetTransferFloatId("");
+
+      await loadInitialData();
+      alert(`✅ ₹${parsedAmount.toLocaleString()} successfully transferred from ${selectedFloat.staffName} to ${targetFloat.staffName}.`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Float transfer failed: " + err.message);
+    }
+  };
+
+  // Handler: Record Vendor Payment from Float
   const handleRecordVendorPayFromFloat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedFloat || !selectedVendorForFloatPay || !floatVendorPayAmount) return;
+    if (!canManageFloats || !user || !selectedFloat || !selectedVendorForFloatPay || !floatVendorPayAmount) return;
 
     const parsedAmount = Number(floatVendorPayAmount);
 
     try {
-      // 1. Log expense in Float Ledger (Deducts from Float)
       const expenseData = {
         floatId: selectedFloat.id,
         staffUid: selectedFloat.staffUid,
@@ -259,7 +386,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       };
       await addDoc(collection(db, "accounting_general_expenses"), expenseData);
 
-      // Deduct from Float Balance
       const updatedSpent = selectedFloat.totalSpentAmount + parsedAmount;
       const updatedBalance = selectedFloat.currentFloatBalance - parsedAmount;
       await updateDoc(doc(db, "accounting_general_floats", selectedFloat.id), {
@@ -268,7 +394,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         updatedAt: new Date().toISOString(),
       });
 
-      // 2. Log in Vendor's Ledger (Reduces Vendor Due)
       const vendorTxnData = {
         vendorId: selectedVendorForFloatPay.id,
         vendorName: selectedVendorForFloatPay.vendorName,
@@ -276,7 +401,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         amount: parsedAmount,
         date: new Date().toISOString().split("T")[0],
         paymentDetails: { mode: floatVendorPayMode, cashDescription: `Paid on-ground from ${selectedFloat.staffName}'s float` },
-        paidFromFloat: true, // 🔑 Flag to prevent double deduction in master view
+        paidFromFloat: true,
         floatId: selectedFloat.id,
         remarks: `Paid from ${selectedFloat.staffName}'s float: ${floatVendorPayRemarks}`,
         createdAt: new Date().toISOString(),
@@ -285,7 +410,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       };
       await addDoc(collection(db, "accounting_vendor_transactions"), vendorTxnData);
 
-      // Update Vendor Balance
       const updatedVendorBalance = selectedVendorForFloatPay.currentBalance - parsedAmount;
       const updatedVendorPaid = selectedVendorForFloatPay.totalPaid + parsedAmount;
       await updateDoc(doc(db, "accounting_vendors", selectedVendorForFloatPay.id), {
@@ -305,17 +429,16 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   };
 
-  // 🌟 Handler: Record Staff Salary/Advance Payment from Float
+  // Handler: Record Staff Salary/Advance Payment from Float
   const handleRecordStaffPayFromFloat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedFloat || !selectedStaffForFloatPay || !floatStaffPayAmount) return;
+    if (!canManageFloats || !user || !selectedFloat || !selectedStaffForFloatPay || !floatStaffPayAmount) return;
 
     const parsedAmount = Number(floatStaffPayAmount);
     const targetStaff = staffList.find((s) => s.uid === selectedStaffForFloatPay);
     const targetStaffName = targetStaff?.displayName || targetStaff?.email || "Staff";
 
     try {
-      // 1. Log expense in Float Ledger
       const expenseData = {
         floatId: selectedFloat.id,
         staffUid: selectedFloat.staffUid,
@@ -330,7 +453,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       };
       await addDoc(collection(db, "accounting_general_expenses"), expenseData);
 
-      // Deduct from Float Balance
       const updatedSpent = selectedFloat.totalSpentAmount + parsedAmount;
       const updatedBalance = selectedFloat.currentFloatBalance - parsedAmount;
       await updateDoc(doc(db, "accounting_general_floats", selectedFloat.id), {
@@ -339,14 +461,13 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         updatedAt: new Date().toISOString(),
       });
 
-      // 2. Log in Staff's Salary Account
       const staffTxnData = {
         staffUid: selectedStaffForFloatPay,
         type: floatStaffPayTxnType,
         amount: parsedAmount,
         date: new Date().toISOString().split("T")[0],
         paymentDetails: { mode: floatStaffPayMode, cashDescription: `Given on-ground from ${selectedFloat.staffName}'s float` },
-        paidFromFloat: true, // 🔑 Flag to prevent double deduction in master view
+        paidFromFloat: true,
         floatId: selectedFloat.id,
         remarks: `Disbursed by ${selectedFloat.staffName} from float: ${floatStaffPayRemarks}`,
         createdAt: new Date().toISOString(),
@@ -366,11 +487,10 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   };
 
-
   // Submit 1: Open Temporary Staff Float
   const handleOpenFloat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !disburseStaffUid || !initialAmount) return;
+    if (!canManageFloats || !user || !disburseStaffUid || !initialAmount) return;
 
     const chosenStaff = staffList.find((s) => s.uid === disburseStaffUid);
     const parsedAmount = Number(initialAmount);
@@ -437,7 +557,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   // Submit 2: Top-Up Active Float
   const handleTopUpFloat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedFloat || !topUpAmount) return;
+    if (!canManageFloats || !user || !selectedFloat || !topUpAmount) return;
 
     const parsedAmount = Number(topUpAmount);
     const topUpPaymentDetails = buildPaymentDetails(
@@ -504,6 +624,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       setTopUpRemarks("");
       setTopUpTxnId("");
       setTopUpCashDesc("");
+      fetchFundingHistory(selectedFloat.id);
       alert("✅ Float account successfully topped up.");
     } catch (err: any) {
       console.error(err);
@@ -514,7 +635,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   // Submit 3: Log Field Expense
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedFloat || !expenseAmount || !expenseDetails) return;
+    if (!canManageFloats || !user || !selectedFloat || !expenseAmount || !expenseDetails) return;
 
     const parsedAmount = Number(expenseAmount);
     const chosenType = isCreatingExpenseType ? customExpenseType.trim() : expenseType;
@@ -588,15 +709,13 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   };
 
-  // Submit 4: Mathematically Correct Settlement & Reconciliation
+  // Submit 4: Settle & Close Float
   const handleSettleFloat = async () => {
-    if (!user || !selectedFloat) return;
+    if (!canManageFloats || !user || !selectedFloat) return;
 
     const totalDisbursed = selectedFloat.initialDisbursedAmount + (selectedFloat.totalTopUpAmount || 0);
     const totalSpent = selectedFloat.totalSpentAmount || 0;
     const difference = totalDisbursed - totalSpent; 
-    // Positive = Surplus money left with staff to return
-    // Negative = Deficit / Out-of-pocket spend by staff to reimburse
 
     let confirmationMsg = `Settle Float Account for ${selectedFloat.staffName}?\n`;
     confirmationMsg += `Total Disbursed: ₹${totalDisbursed}\n`;
@@ -605,7 +724,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     if (difference > 0) {
       confirmationMsg += `\n💡 SURPLUS: Staff holds unspent ₹${difference}. This will be REVERSED back to the company account.`;
     } else if (difference < 0) {
-      confirmationMsg += `\n💡 DEFICIT: Staff spent ₹{Math.abs(difference)} extra out-of-pocket. This will be REIMBURSED to the staff.`;
+      confirmationMsg += `\n💡 DEFICIT: Staff spent ₹${Math.abs(difference)} extra out-of-pocket. This will be REIMBURSED to the staff.`;
     } else {
       confirmationMsg += `\n💡 BALANCED: Zero variance.`;
     }
@@ -617,7 +736,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       let auditNotes = `Settled float with balanced zero variance.`;
 
       if (difference < 0) {
-        // Staff spent MORE: Automatically disburse the deficit as an adjustment top-up
         const extraDeficit = Math.abs(difference);
         updatedTopUps += extraDeficit;
 
@@ -634,10 +752,9 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
 
         auditNotes = `Settled float. Automatically reimbursed out-of-pocket deficit of ₹${extraDeficit} to staff. Balance brought to 0.`;
       } else if (difference > 0) {
-        // Staff has SURPLUS: Record surplus reversal transaction
         await addDoc(collection(db, "accounting_general_topups"), {
           floatId: selectedFloat.id,
-          amount: -difference, // negative top-up representing cash return
+          amount: -difference,
           date: new Date().toISOString().split("T")[0],
           paymentDetails: { mode: "Cash", cashDescription: "Automatic Settlement Cash Surplus Reversal" },
           remarks: "Cash surplus returned to company treasury upon float settlement",
@@ -652,7 +769,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       const updatePayload = {
         status: "SETTLED" as const,
         totalTopUpAmount: updatedTopUps,
-        currentFloatBalance: 0, // Brought strictly to zero
+        currentFloatBalance: 0,
         settledAt: new Date().toISOString(),
         settledByUid: user.uid,
         updatedAt: new Date().toISOString(),
@@ -691,7 +808,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-neutral-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-
         <div className="mb-4">
           <button
             onClick={() => router.push("/accounting")}
@@ -709,18 +825,25 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
               <p className="text-[10px] uppercase font-mono font-black tracking-widest text-neutral-500">
                 BRAJWAL ERP / GENERAL & PETTY EXPENSES
               </p>
+              {isReadOnlyViewer && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold border border-blue-200">
+                  AUDITOR / READ-ONLY
+                </span>
+              )}
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight text-neutral-950 mt-1">
               General Credit Ledger & Staff Floats
             </h1>
           </div>
-           
-          <button
-            onClick={() => setShowOpenFloatModal(true)}
-            className="px-5 py-2.5 rounded-lg font-black text-xs uppercase tracking-wider bg-neutral-900 text-white hover:bg-neutral-800 transition shadow-[4px_4px_10px_rgba(0,0,0,0.15)] active:translate-y-0.5"
-          >
-            + Disburse Staff Float
-          </button>
+
+          {canManageFloats && (
+            <button
+              onClick={() => setShowOpenFloatModal(true)}
+              className="px-5 py-2.5 rounded-lg font-black text-xs uppercase tracking-wider bg-neutral-900 text-white hover:bg-neutral-800 transition shadow-[4px_4px_10px_rgba(0,0,0,0.15)] active:translate-y-0.5"
+            >
+              + Disburse Staff Float
+            </button>
+          )}
         </div>
 
         {/* Master Layout */}
@@ -842,22 +965,38 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
                       </p>
                     </div>
 
-                    {selectedFloat.status === "ACTIVE" && (
-                      <div className="flex items-center gap-2 font-mono">
-                        <button
-                          onClick={() => setShowTopUpModal(true)}
-                          className="px-3.5 py-2 bg-neutral-900 text-white rounded-lg text-xs font-black uppercase hover:bg-neutral-800 transition"
-                        >
-                          + Top-Up Float
-                        </button>
-                        <button
-                          onClick={() => handleSettleFloat()}
-                          className="px-3.5 py-2 border border-neutral-400 text-neutral-900 rounded-lg text-xs font-black uppercase hover:bg-neutral-100 transition"
-                        >
-                          ✓ Settle & Close
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2 font-mono">
+                      {/* Funding History viewable by all authorized viewers */}
+                      <button
+                        onClick={() => setShowFundingHistoryModal(true)}
+                        className="px-3 py-2 bg-white border border-neutral-300 text-neutral-800 rounded-lg text-xs font-black uppercase hover:bg-neutral-100 transition shadow-sm"
+                      >
+                        📜 Funding & Top-Up History
+                      </button>
+
+                      {selectedFloat.status === "ACTIVE" && canManageFloats && (
+                        <>
+                          <button
+                            onClick={() => setShowTransferFloatModal(true)}
+                            className="px-3 py-2 bg-teal-700 text-white rounded-lg text-xs font-black uppercase hover:bg-teal-800 transition shadow-sm"
+                          >
+                            ⇄ Transfer Float
+                          </button>
+                          <button
+                            onClick={() => setShowTopUpModal(true)}
+                            className="px-3 py-2 bg-neutral-900 text-white rounded-lg text-xs font-black uppercase hover:bg-neutral-800 transition"
+                          >
+                            + Top-Up
+                          </button>
+                          <button
+                            onClick={() => handleSettleFloat()}
+                            className="px-3 py-2 border border-neutral-400 text-neutral-900 rounded-lg text-xs font-black uppercase hover:bg-neutral-100 transition"
+                          >
+                            ✓ Settle
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 font-mono">
@@ -872,7 +1011,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
 
                     <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
                       <p className="text-[10px] uppercase font-black tracking-widest text-neutral-400">
-                        Total Top-Ups
+                        Total Top-Ups / Received
                       </p>
                       <p className="text-lg font-black text-neutral-900 mt-1">
                         ₹{selectedFloat.totalTopUpAmount.toLocaleString()}
@@ -919,29 +1058,28 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
                       </p>
                     </div>
 
-                    {/* 🌟 REPLACE WITH THESE 3 BUTTONS: */}
-{selectedFloat.status === "ACTIVE" && (
-  <div className="flex flex-wrap items-center gap-2">
-    <button
-      onClick={() => setShowAddExpenseModal(true)}
-      className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
-    >
-      + 1. Log General Expense
-    </button>
-    <button
-      onClick={() => setShowFloatVendorPayModal(true)}
-      className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-blue-700 text-white hover:bg-blue-800 transition"
-    >
-      + 2. Pay Vendor from Float
-    </button>
-    <button
-      onClick={() => setShowFloatStaffPayModal(true)}
-      className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-purple-700 text-white hover:bg-purple-800 transition"
-    >
-      + 3. Pay Staff Salary from Float
-    </button>
-  </div>
-)}
+                    {selectedFloat.status === "ACTIVE" && canManageFloats && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => setShowAddExpenseModal(true)}
+                          className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
+                        >
+                          + 1. Log General Expense
+                        </button>
+                        <button
+                          onClick={() => setShowFloatVendorPayModal(true)}
+                          className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-blue-700 text-white hover:bg-blue-800 transition"
+                        >
+                          + 2. Pay Vendor from Float
+                        </button>
+                        <button
+                          onClick={() => setShowFloatStaffPayModal(true)}
+                          className="px-3.5 py-2 rounded-lg font-mono text-xs font-black uppercase bg-purple-700 text-white hover:bg-purple-800 transition"
+                        >
+                          + 3. Pay Staff Salary from Float
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="overflow-x-auto">
@@ -1018,7 +1156,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       </div>
 
       {/* Modal 1: Open Temporary Staff Float */}
-      {showOpenFloatModal && (
+      {showOpenFloatModal && canManageFloats && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
@@ -1183,7 +1321,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       )}
 
       {/* Modal 2: Top-Up Active Float */}
-      {showTopUpModal && selectedFloat && (
+      {showTopUpModal && canManageFloats && selectedFloat && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
@@ -1309,7 +1447,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       )}
 
       {/* Modal 3: Log Field Expense */}
-      {showAddExpenseModal && selectedFloat && (
+      {showAddExpenseModal && canManageFloats && selectedFloat && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
@@ -1348,7 +1486,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
                 </div>
               </div>
 
-              {/* Type of Purchase */}
               <div>
                 <label className="block font-black text-neutral-800 mb-1 uppercase">Type of Purchase *</label>
                 {!isCreatingExpenseType ? (
@@ -1405,7 +1542,6 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
                 />
               </div>
 
-              {/* Optional CRM Wedding Selector */}
               <div>
                 <label className="block font-black text-neutral-800 mb-1 uppercase">
                   Optional: Link to Wedding(s)
@@ -1462,8 +1598,8 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         </div>
       )}
 
-     {/* 🌟 MODAL: PAY VENDOR FROM FLOAT */}
-      {showFloatVendorPayModal && selectedFloat && (
+      {/* Modal: Pay Vendor from Float */}
+      {showFloatVendorPayModal && canManageFloats && selectedFloat && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-xs">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 border shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
@@ -1539,8 +1675,8 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         </div>
       )}
 
-      {/* 🌟 MODAL: PAY STAFF SALARY/ADVANCE FROM FLOAT */}
-      {showFloatStaffPayModal && selectedFloat && (
+      {/* Modal: Pay Staff Salary/Advance from Float */}
+      {showFloatStaffPayModal && canManageFloats && selectedFloat && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-xs">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 border shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
@@ -1616,6 +1752,246 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         </div>
       )}
 
+      {/* Modal: View Funding & Top-Up History */}
+      {showFundingHistoryModal && selectedFloat && (
+        <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-xs">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
+              <div>
+                <h2 className="text-base font-black uppercase text-neutral-950">
+                  Funding, Top-Ups & Float Transfer History
+                </h2>
+                <p className="text-[11px] text-neutral-500">
+                  Beneficiary: {selectedFloat.staffName} (Status: {selectedFloat.status})
+                </p>
+              </div>
+              <button
+                onClick={() => setShowFundingHistoryModal(false)}
+                className="text-neutral-400 hover:text-black font-black text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Initial Disbursement Card */}
+              <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200 space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-neutral-900 text-white">
+                    Initial Float Disbursal
+                  </span>
+                  <span className="font-bold text-neutral-500 text-[11px]">
+                    {new Date(selectedFloat.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-1">
+                  <div>
+                    <p className="font-bold text-neutral-800">
+                      Disbursed via {selectedFloat.disbursementPaymentDetails.mode}
+                    </p>
+                    {selectedFloat.disbursementPaymentDetails.fromAccount && (
+                      <p className="text-[10px] text-neutral-500">
+                        From: {selectedFloat.disbursementPaymentDetails.fromAccount}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-base font-black text-emerald-600">
+                    +₹{selectedFloat.initialDisbursedAmount.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Top-Ups and Peer Transfers Table */}
+              <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-neutral-100 text-neutral-500 text-[10px] uppercase font-bold border-b border-neutral-200">
+                    <tr>
+                      <th className="p-2.5">Date</th>
+                      <th className="p-2.5">Type</th>
+                      <th className="p-2.5">Details / Remarks</th>
+                      <th className="p-2.5 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {fundingHistoryList.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-neutral-400">
+                          NO TOP-UPS OR CASH TRANSFERS RECORDED FOR THIS FLOAT.
+                        </td>
+                      </tr>
+                    ) : (
+                      fundingHistoryList.map((entry) => {
+                        const isTransferIn = entry.type === "TRANSFER_IN";
+                        const isTransferOut = entry.type === "TRANSFER_OUT";
+                        const isPositive = Number(entry.amount) > 0;
+
+                        return (
+                          <tr key={entry.id} className="hover:bg-neutral-50 transition">
+                            <td className="p-2.5 font-bold whitespace-nowrap">
+                              {entry.date || entry.createdAt?.split("T")[0]}
+                            </td>
+                            <td className="p-2.5 whitespace-nowrap">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[9px] font-black border ${
+                                  isTransferIn
+                                    ? "bg-teal-50 text-teal-800 border-teal-300"
+                                    : isTransferOut
+                                    ? "bg-amber-50 text-amber-800 border-amber-300"
+                                    : "bg-blue-50 text-blue-800 border-blue-300"
+                                }`}
+                              >
+                                {isTransferIn
+                                  ? "RECEIVED (TRANSFER)"
+                                  : isTransferOut
+                                  ? "SENT (TRANSFER)"
+                                  : "COMPANY TOP-UP"}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-[11px] text-neutral-700">
+                              <p className="font-semibold">{entry.remarks || "—"}</p>
+                              {entry.paymentDetails?.mode && (
+                                <p className="text-[10px] text-neutral-400">
+                                  Mode: {entry.paymentDetails.mode}
+                                </p>
+                              )}
+                            </td>
+                            <td
+                              className={`p-2.5 text-right font-black whitespace-nowrap ${
+                                isPositive ? "text-emerald-600" : "text-rose-600"
+                              }`}
+                            >
+                              {isPositive ? "+" : ""}₹{Math.abs(Number(entry.amount)).toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-neutral-200">
+              <button
+                type="button"
+                onClick={() => setShowFundingHistoryModal(false)}
+                className="px-4 py-2 bg-neutral-900 text-white font-bold rounded-lg uppercase"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Transfer Float Balance to Another Staff */}
+      {showTransferFloatModal && canManageFloats && selectedFloat && (
+        <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 border shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <div>
+                <h2 className="text-base font-black uppercase text-teal-950">
+                  Transfer Float Balance
+                </h2>
+                <p className="text-[11px] text-neutral-500">
+                  From: {selectedFloat.staffName} (Available: ₹{selectedFloat.currentFloatBalance.toLocaleString()})
+                </p>
+              </div>
+              <button
+                onClick={() => setShowTransferFloatModal(false)}
+                className="font-black text-neutral-400 hover:text-black"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleTransferFloat} className="space-y-4">
+              <div>
+                <label className="block font-black mb-1 uppercase text-neutral-800">
+                  Select Target Staff Member *
+                </label>
+                <select
+                  required
+                  value={targetTransferFloatId}
+                  onChange={(e) => setTargetTransferFloatId(e.target.value)}
+                  className="w-full border border-neutral-300 p-2.5 rounded-lg bg-neutral-50 font-bold outline-none"
+                >
+                  <option value="">-- Choose Recipient Active Float --</option>
+                  {activeFloats
+                    .filter((f) => f.id !== selectedFloat.id)
+                    .map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.staffName} (Current Float: ₹{f.currentFloatBalance.toLocaleString()})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black mb-1 uppercase text-neutral-800">
+                    Amount to Handover (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    max={selectedFloat.currentFloatBalance}
+                    placeholder="e.g. 10000"
+                    value={transferAmount}
+                    onChange={(e) => setTransferAmount(Number(e.target.value))}
+                    className="w-full border border-neutral-300 p-2.5 rounded-lg bg-neutral-50 font-bold outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-black mb-1 uppercase text-neutral-800">
+                    Transfer Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={transferDate}
+                    onChange={(e) => setTransferDate(e.target.value)}
+                    className="w-full border border-neutral-300 p-2.5 rounded-lg bg-neutral-50 font-bold outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-black mb-1 uppercase text-neutral-800">
+                  Reason / Handover Note
+                </label>
+                <input
+                  placeholder="e.g. Extra cash given for vendor stage advance..."
+                  value={transferRemarks}
+                  onChange={(e) => setTransferRemarks(e.target.value)}
+                  className="w-full border border-neutral-300 p-2.5 rounded-lg bg-neutral-50 outline-none"
+                />
+              </div>
+
+              <div className="bg-teal-50 border border-teal-200 p-3 rounded-lg text-[11px] text-teal-800">
+                ℹ️ This is an internal float transfer. It adjusts staff custody balances without creating an expense entry in company accounts.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferFloatModal(false)}
+                  className="px-4 py-2 border font-bold rounded-lg uppercase"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-teal-700 text-white font-black rounded-lg uppercase hover:bg-teal-800 transition"
+                >
+                  Confirm Transfer
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

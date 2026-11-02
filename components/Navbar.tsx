@@ -12,12 +12,20 @@ export default function Navbar() {
 
   if (!user) return null;
 
+  // Hardcoded Read-Only Auditor Check
+  const READ_ONLY_ACCOUNTING_EMAIL = "itsmanisharora@gmail.com";
+  const isAccountingAuditor =
+    user?.email?.toLowerCase().trim() === READ_ONLY_ACCOUNTING_EMAIL.toLowerCase().trim();
+
   const isSales = role === "sales";
   const isProduction = role === "production";
-  const isAccountant = role === "accountant" as any;
+  const isAccountant = (role as any) === "accountant";
   const canAccessProduction = isSuperAdmin || isProduction || role === "admin";
   const canAccessSales = isSuperAdmin || isSales || role === "admin";
-  const canAccessAccounting = isSuperAdmin || isAccountant || role === "admin";
+
+  // Allow access if Super Admin, Accountant, Admin OR the hardcoded Auditor
+  const canAccessAccounting =
+    isSuperAdmin || isAccountant || role === "admin" || isAccountingAuditor;
 
   return (
     <header className="bg-gray-900 text-white border-b border-gray-800 sticky top-0 z-40">
@@ -33,8 +41,8 @@ export default function Navbar() {
               <Link
                 href="/admin/team"
                 className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-black whitespace-nowrap transition ${
-                  pathname === "/admin/team" 
-                    ? "bg-red-600 text-white shadow" 
+                  pathname === "/admin/team"
+                    ? "bg-red-600 text-white shadow"
                     : "bg-red-950 text-red-200 hover:bg-red-900"
                 }`}
               >
@@ -42,7 +50,7 @@ export default function Navbar() {
               </Link>
             )}
 
-            {/* 2. ACCOUNTING ERP (SUPER ADMIN & ACCOUNTANT) */}
+            {/* 2. ACCOUNTING ERP */}
             {canAccessAccounting && (
               <Link
                 href="/accounting"
@@ -55,14 +63,14 @@ export default function Navbar() {
                 📊 Accounting ERP
               </Link>
             )}
-            
+
             {/* 3. Sales CRM & Quotes */}
             {canAccessSales && (
               <Link
                 href="/crm"
                 className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                  pathname.startsWith("/crm") 
-                    ? "bg-amber-600 text-white shadow" 
+                  pathname.startsWith("/crm")
+                    ? "bg-amber-600 text-white shadow"
                     : "text-amber-300 hover:bg-gray-800 hover:text-white"
                 }`}
               >
@@ -74,8 +82,8 @@ export default function Navbar() {
             <Link
               href="/handovers"
               className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                pathname.startsWith("/handovers") 
-                  ? "bg-purple-700 text-white shadow" 
+                pathname.startsWith("/handovers")
+                  ? "bg-purple-700 text-white shadow"
                   : "text-purple-300 hover:bg-gray-800 hover:text-white"
               }`}
             >
@@ -88,7 +96,9 @@ export default function Navbar() {
                 <Link
                   href="/components"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                    pathname === "/components" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                    pathname === "/components"
+                      ? "bg-blue-600 text-white"
+                      : "text-gray-300 hover:bg-gray-800"
                   }`}
                 >
                   🏛️ Components
@@ -97,7 +107,9 @@ export default function Navbar() {
                 <Link
                   href="/flowers"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                    pathname === "/flowers" ? "bg-pink-700 text-white shadow" : "text-pink-300 hover:bg-gray-800"
+                    pathname === "/flowers"
+                      ? "bg-pink-700 text-white shadow"
+                      : "text-pink-300 hover:bg-gray-800"
                   }`}
                 >
                   🌸 Flowers
@@ -106,16 +118,55 @@ export default function Navbar() {
                 <Link
                   href="/labors"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                    pathname === "/labors" ? "bg-amber-600 text-white shadow" : "text-amber-300 hover:bg-gray-800"
+                    pathname === "/labors"
+                      ? "bg-amber-600 text-white shadow"
+                      : "text-amber-300 hover:bg-gray-800"
                   }`}
                 >
                   👷 Labor
                 </Link>
 
+                {/* 🌟 NEW: VENDOR RENTALS LIBRARY */}
+                <Link
+                  href="/rentals"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname.startsWith("/rentals")
+                      ? "bg-indigo-600 text-white shadow"
+                      : "text-indigo-300 hover:bg-gray-800"
+                  }`}
+                >
+                  🚚 Rentals
+                </Link>
+
+                {/* 🌟 NEW: FRESH CONSUMABLES LIBRARY */}
+                <Link
+                  href="/consumables"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname.startsWith("/consumables")
+                      ? "bg-teal-600 text-white shadow"
+                      : "text-teal-300 hover:bg-gray-800"
+                  }`}
+                >
+                  ✨ Consumables
+                </Link>
+
+                <Link
+                  href="/vendor-costs"
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
+                    pathname === "/vendor-costs"
+                      ? "bg-emerald-600 text-white shadow"
+                      : "text-emerald-300 hover:bg-gray-800"
+                  }`}
+                >
+                  💰 Vendor Costs
+                </Link>
+
                 <Link
                   href="/entertainment"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                    pathname === "/entertainment" ? "bg-purple-800 text-white" : "text-gray-300 hover:bg-gray-800"
+                    pathname === "/entertainment"
+                      ? "bg-purple-800 text-white"
+                      : "text-gray-300 hover:bg-gray-800"
                   }`}
                 >
                   📦 Other Items
@@ -124,7 +175,9 @@ export default function Navbar() {
                 <Link
                   href="/elements"
                   className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition ${
-                    pathname === "/elements" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                    pathname === "/elements"
+                      ? "bg-blue-600 text-white"
+                      : "text-gray-300 hover:bg-gray-800"
                   }`}
                 >
                   📦 Props
@@ -137,16 +190,28 @@ export default function Navbar() {
         <div className="flex items-center gap-3">
           <div className="text-right hidden md:block">
             <p className="text-xs text-gray-300 font-semibold">{user.email}</p>
-            <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded border ${
-              isSuperAdmin 
-                ? "bg-red-950 text-red-300 border-red-700" 
+            <span
+              className={`text-[10px] uppercase font-black px-2 py-0.5 rounded border ${
+                isSuperAdmin
+                  ? "bg-red-950 text-red-300 border-red-700"
+                  : isAccountingAuditor
+                  ? "bg-blue-950 text-blue-300 border-blue-700"
+                  : isAccountant
+                  ? "bg-emerald-950 text-emerald-300 border-emerald-700"
+                  : isSales
+                  ? "bg-amber-950 text-amber-300 border-amber-800"
+                  : "bg-blue-950 text-blue-300 border-blue-800"
+              }`}
+            >
+              {isSuperAdmin
+                ? "👑 Super Admin"
+                : isAccountingAuditor
+                ? "🔍 Auditor (View Only)"
                 : isAccountant
-                ? "bg-emerald-950 text-emerald-300 border-emerald-700"
-                : isSales 
-                ? "bg-amber-950 text-amber-300 border-amber-800" 
-                : "bg-blue-950 text-blue-300 border-blue-800"
-            }`}>
-              {isSuperAdmin ? "👑 Super Admin" : isAccountant ? "📊 Accountant" : isSales ? "💼 Sales" : "🛠️ Production"}
+                ? "📊 Accountant"
+                : isSales
+                ? "💼 Sales"
+                : "🛠️ Production"}
             </span>
           </div>
           <button

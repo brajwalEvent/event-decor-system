@@ -37,8 +37,18 @@ export default function VendorAccountingPage(): React.ReactElement {
   const { user, role, isSuperAdmin, loading } = useAuth();
   const router = useRouter();
 
+  // Hardcoded Read-Only Auditor / Viewer
+  const READ_ONLY_EMAIL = "itsmanisharora@gmail.com";
+  const isReadOnlyViewer =
+    user?.email?.toLowerCase().trim() === READ_ONLY_EMAIL.toLowerCase().trim();
+
   const isAccountant = (role as any) === "accountant";
-  const canAccess = isSuperAdmin || isAccountant || role === "admin";
+  const canAccess =
+    isSuperAdmin || isAccountant || role === "admin" || isReadOnlyViewer;
+
+  // Management Permission (Hidden from Read-Only Viewer)
+  const canManageVendors =
+    !isReadOnlyViewer && (isSuperAdmin || isAccountant || role === "admin");
 
   // Data states
   const [vendors, setVendors] = useState<VendorAccount[]>([]);
@@ -135,6 +145,9 @@ export default function VendorAccountingPage(): React.ReactElement {
       setVendors(vList);
       if (vList.length > 0 && !selectedVendor) {
         setSelectedVendor(vList[0]);
+      } else if (selectedVendor) {
+        const refreshed = vList.find((v) => v.id === selectedVendor.id);
+        if (refreshed) setSelectedVendor(refreshed);
       }
 
       const userSnap = await getDocs(collection(db, "users"));
@@ -224,7 +237,7 @@ export default function VendorAccountingPage(): React.ReactElement {
   // Submit: Onboard New Vendor
   const handleCreateVendor = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !newVendorName.trim() || !newVendorMobile.trim()) return;
+    if (!canManageVendors || !user || !newVendorName.trim() || !newVendorMobile.trim()) return;
 
     try {
       setIsUploading(true);
@@ -318,7 +331,7 @@ export default function VendorAccountingPage(): React.ReactElement {
   // Submit: Add/Update Bank Details
   const handleUpdateBankDetails = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedVendor) return;
+    if (!canManageVendors || !user || !selectedVendor) return;
 
     try {
       setIsUploading(true);
@@ -392,17 +405,10 @@ export default function VendorAccountingPage(): React.ReactElement {
     }
   };
 
-  // Helper to strip undefined values so Firestore doesn't crash
-  function cleanFirestoreData(data: Record<string, any>) {
-    return Object.fromEntries(
-      Object.entries(data).filter(([_, v]) => v !== undefined)
-    );
-  }
-
   // Submit: Log Purchase
   const handleRecordPurchase = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedVendor || !purchAmount || !purchStaffUid) return;
+    if (!canManageVendors || !user || !selectedVendor || !purchAmount || !purchStaffUid) return;
 
     const parsedAmount = Number(purchAmount);
     const chosenStaff = staffList.find((s) => s.uid === purchStaffUid);
@@ -477,7 +483,7 @@ export default function VendorAccountingPage(): React.ReactElement {
   // Submit: Log Payment
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedVendor || !payAmount) return;
+    if (!canManageVendors || !user || !selectedVendor || !payAmount) return;
 
     const parsedAmount = Number(payAmount);
 
@@ -502,10 +508,9 @@ export default function VendorAccountingPage(): React.ReactElement {
     }
 
     try {
-      // 🌟 NEW CODE: Save vendorName directly on the transaction
       const txnData: any = {
         vendorId: selectedVendor.id,
-        vendorName: selectedVendor.vendorName, // <--- SAVES VENDOR NAME
+        vendorName: selectedVendor.vendorName,
         type: payTxnType,
         amount: parsedAmount,
         date: payDate,
@@ -519,7 +524,6 @@ export default function VendorAccountingPage(): React.ReactElement {
         txnData.remarks = payRemarks.trim();
       }
 
-      // 🌟 Pass through cleanFirestoreData to strip out any undefined fields (like fromAccount)
       await addDoc(
         collection(db, "accounting_vendor_transactions"), 
         cleanFirestoreData(txnData)
@@ -595,18 +599,26 @@ export default function VendorAccountingPage(): React.ReactElement {
               <p className="text-[10px] uppercase font-mono font-black tracking-widest text-neutral-500">
                 BRAJWAL ERP / VENDOR CREDIT MANAGEMENT
               </p>
+              {isReadOnlyViewer && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold border border-blue-200">
+                  AUDITOR / READ-ONLY
+                </span>
+              )}
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight text-neutral-950 mt-1">
               Vendor Accounts & Credit Ledger
             </h1>
           </div>
 
-          <button
-            onClick={() => setShowAddVendorModal(true)}
-            className="px-5 py-2.5 rounded-lg font-black text-xs uppercase tracking-wider bg-neutral-900 text-white hover:bg-neutral-800 transition shadow-[4px_4px_10px_rgba(0,0,0,0.15)] active:translate-y-0.5"
-          >
-            + Onboard New Vendor
-          </button>
+          {/* Onboard Vendor Button (Hidden for Read-Only Auditor) */}
+          {canManageVendors && (
+            <button
+              onClick={() => setShowAddVendorModal(true)}
+              className="px-5 py-2.5 rounded-lg font-black text-xs uppercase tracking-wider bg-neutral-900 text-white hover:bg-neutral-800 transition shadow-[4px_4px_10px_rgba(0,0,0,0.15)] active:translate-y-0.5"
+            >
+              + Onboard New Vendor
+            </button>
+          )}
         </div>
 
         {/* Master Layout */}
@@ -700,18 +712,23 @@ export default function VendorAccountingPage(): React.ReactElement {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* View payment options is safe for Auditor to inspect */}
                       <button
                         onClick={() => setShowPaymentOptionsModal(true)}
                         className="px-3.5 py-2 border border-neutral-400 text-neutral-900 rounded-lg text-xs font-mono font-black uppercase hover:bg-neutral-100 transition shadow-sm"
                       >
                         💳 View Payment Options
                       </button>
-                      <button
-                        onClick={() => setShowUpdateBankModal(true)}
-                        className="px-3.5 py-2 bg-neutral-900 text-white rounded-lg text-xs font-mono font-black uppercase hover:bg-neutral-800 transition"
-                      >
-                        + Add Bank / UPI
-                      </button>
+                      
+                      {/* Add Bank/UPI Button (Hidden for Read-Only Auditor) */}
+                      {canManageVendors && (
+                        <button
+                          onClick={() => setShowUpdateBankModal(true)}
+                          className="px-3.5 py-2 bg-neutral-900 text-white rounded-lg text-xs font-mono font-black uppercase hover:bg-neutral-800 transition"
+                        >
+                          + Add Bank / UPI
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -782,20 +799,23 @@ export default function VendorAccountingPage(): React.ReactElement {
                       </button>
                     </div>
 
-                    {activeTab === "PURCHASES" ? (
-                      <button
-                        onClick={() => setShowNewPurchaseModal(true)}
-                        className="px-4 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
-                      >
-                        + Log New Purchase
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setShowNewPaymentModal(true)}
-                        className="px-4 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
-                      >
-                        + Record Payment
-                      </button>
+                    {/* Action buttons (Hidden for Read-Only Auditor) */}
+                    {canManageVendors && (
+                      activeTab === "PURCHASES" ? (
+                        <button
+                          onClick={() => setShowNewPurchaseModal(true)}
+                          className="px-4 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
+                        >
+                          + Log New Purchase
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setShowNewPaymentModal(true)}
+                          className="px-4 py-2 rounded-lg font-mono text-xs font-black uppercase bg-neutral-950 text-white hover:bg-neutral-800 transition"
+                        >
+                          + Record Payment
+                        </button>
+                      )
                     )}
                   </div>
 
@@ -955,7 +975,7 @@ export default function VendorAccountingPage(): React.ReactElement {
         </div>
       </div>
 
-      {/* Modal: View Payment Options */}
+      {/* Modal: View Payment Options (Safe for Auditor to inspect) */}
       {showPaymentOptionsModal && selectedVendor && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 border border-neutral-300 shadow-2xl space-y-5 max-h-[85vh] overflow-y-auto font-mono">
@@ -1045,7 +1065,7 @@ export default function VendorAccountingPage(): React.ReactElement {
       )}
 
       {/* Modal: Onboard New Vendor */}
-      {showAddVendorModal && (
+      {showAddVendorModal && canManageVendors && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
@@ -1228,7 +1248,7 @@ export default function VendorAccountingPage(): React.ReactElement {
       )}
 
       {/* Modal: Add Bank/UPI Details */}
-      {showUpdateBankModal && selectedVendor && (
+      {showUpdateBankModal && canManageVendors && selectedVendor && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
@@ -1340,7 +1360,7 @@ export default function VendorAccountingPage(): React.ReactElement {
       )}
 
       {/* Modal: Log Purchase */}
-      {showNewPurchaseModal && selectedVendor && (
+      {showNewPurchaseModal && canManageVendors && selectedVendor && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">
@@ -1513,7 +1533,7 @@ export default function VendorAccountingPage(): React.ReactElement {
       )}
 
       {/* Modal: Record Payment */}
-      {showNewPaymentModal && selectedVendor && (
+      {showNewPaymentModal && canManageVendors && selectedVendor && (
         <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 border border-neutral-300 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto font-mono text-xs">
             <div className="flex justify-between items-center border-b border-neutral-200 pb-3">

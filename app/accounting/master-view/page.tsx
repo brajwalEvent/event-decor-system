@@ -17,8 +17,14 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
   const { user, role, isSuperAdmin, loading } = useAuth();
   const router = useRouter();
 
+  // Hardcoded Read-Only Auditor / Viewer
+  const READ_ONLY_EMAIL = "itsmanisharora@gmail.com";
+  const isReadOnlyViewer =
+    user?.email?.toLowerCase().trim() === READ_ONLY_EMAIL.toLowerCase().trim();
+
   const isAccountant = (role as unknown as string) === "accountant";
-  const canAccess = isSuperAdmin || isAccountant || (role as unknown as string) === "admin";
+  const canAccess =
+    isSuperAdmin || isAccountant || (role as unknown as string) === "admin" || isReadOnlyViewer;
 
   const [isMounted, setIsMounted] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -352,6 +358,11 @@ export default function MasterConsolidatedDashboard(): React.ReactElement {
             <span className="text-[10px] font-mono font-black uppercase bg-neutral-900 text-white px-3 py-1 rounded ml-2">
               🔒 View-Only Master Ledger
             </span>
+            {isReadOnlyViewer && (
+              <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-blue-100 text-blue-800 font-bold border border-blue-200 uppercase">
+                Auditor / Read-Only
+              </span>
+            )}
           </div>
         </div>
 

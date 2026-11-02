@@ -911,7 +911,16 @@ export default function HandoverWorkspace() {
                 </button>
               )}
             </div>
-
+{/* PRODUCTION BUDGET BUTTON (Backend Team Only) */}
+            {isProductionOrAdmin && (
+              <button
+                onClick={() => router.push(`/handovers/${handoverId}/budget`)}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-3.5 py-2 rounded-lg text-xs shadow transition flex items-center gap-1"
+              >
+                💰 Production Budget
+              </button>
+            )}
+            
             {/* Quick Action Sheets */}
             <button
               onClick={() => router.push(`/handovers/${handoverId}/labor-planner`)}

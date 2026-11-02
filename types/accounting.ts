@@ -53,6 +53,8 @@ export interface StaffTransaction {
   type: "SALARY_CREDIT" | "ADVANCE_PAYMENT" | "SETTLEMENT_PAYMENT";
   amount: number;
   date: string;
+  joiningDate?: string;               // <--- Added
+  lastSalaryAccruedMonth?: string;
   paymentDetails: PaymentDetails;
   remarks?: string;
   createdAt: string;
