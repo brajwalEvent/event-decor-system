@@ -131,7 +131,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   }, [user, role, isSuperAdmin, loading, canAccess, router]);
 
-  // Load Initial Data
+  // Load Data
   const loadInitialData = async () => {
     try {
       setLoadingData(true);
@@ -221,7 +221,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
     }
   };
 
-  // Fetch Top-Ups and Internal Transfers for the selected float
+  // Fetch Top-Ups and Internal Transfers safely (Types explicitly cast)
   const fetchFundingHistory = async (floatId: string) => {
     try {
       const q = query(
@@ -230,8 +230,8 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
       );
       const snap = await getDocs(q);
       const list = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+        .map((d) => ({ id: d.id, ...d.data() } as any))
+        .sort((a: any, b: any) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
       setFundingHistoryList(list);
     } catch (err) {
       console.error("Error fetching funding history:", err);
@@ -343,12 +343,13 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
         createdByEmail: user.email || "Unknown",
       });
 
+      // Valid action "UPDATE" to satisfy TypeScript audit log constraints
       await recordAuditLog(user, {
         module: "GENERAL_LEDGER",
-        action: "TRANSFER",
+        action: "UPDATE",
         targetId: selectedFloat.id,
         targetName: selectedFloat.staffName,
-        notes: `Transferred ₹${parsedAmount} cash float from ${selectedFloat.staffName} to ${targetFloat.staffName}.`,
+        notes: `[TRANSFER] Transferred ₹${parsedAmount} cash float from ${selectedFloat.staffName} to ${targetFloat.staffName}.`,
       });
 
       setShowTransferFloatModal(false);
@@ -808,6 +809,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-neutral-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
+
         <div className="mb-4">
           <button
             onClick={() => router.push("/accounting")}
@@ -835,7 +837,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
               General Credit Ledger & Staff Floats
             </h1>
           </div>
-
+           
           {canManageFloats && (
             <button
               onClick={() => setShowOpenFloatModal(true)}
@@ -1740,7 +1742,7 @@ export default function GeneralCreditLedgerPage(): React.ReactElement {
                   placeholder="e.g. Event travel food advance given in cash..."
                   value={floatStaffPayRemarks}
                   onChange={(e) => setFloatStaffPayRemarks(e.target.value)}
-                  className="w-full border p-2 rounded bg-neutral-50"
+                  className="w-full border border-neutral-300 p-2 rounded bg-neutral-50 focus:bg-white text-neutral-950 outline-none"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t">
