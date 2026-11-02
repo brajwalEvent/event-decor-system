@@ -40,6 +40,8 @@ export interface StaffAccount {
   staffEmail: string;
   staffMobile: string;
   monthlySalary: number;
+  joiningDate?: string;               // <--- Added
+  lastSalaryAccruedMonth?: string;
   totalAdvanceGiven: number;
   totalPendingDue: number;
   lastPaymentDate?: string;
