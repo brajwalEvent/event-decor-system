@@ -81,8 +81,9 @@ export async function POST(req: Request) {
 
     const formattedMessageText = customTemplateSid
       ? `[Custom Meta Template SID: ${templateSid}] Sent to ${guestName}`
-      : `Namaste ${guestName},
-Greetings from Brajwal Weddings & Events on behalf of ${targetParents}, for your upcoming stay at ${targetResort} for ${targetWedding}
+      : `Namaste ${guestName} Ji,
+Greetings from Brajwal Weddings & Events on behalf of ${targetParents},
+for your upcoming stay at ${targetResort} for ${targetWedding}
 Check-in date: ${targetCheckIn},
 As Per Guidelines, government-issued photo IDs are mandatory for all attending guests for check-in process. Please reply directly to this message with Photos or PDF of ID cards (Aadhaar/Passport) for all family members attending the wedding.
 For any other query feel free to reply to this message, our executive will get back to you.
