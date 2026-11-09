@@ -39,13 +39,29 @@ export default function WeddingLaborPlannerPage() {
   const [globalTravelCost, setGlobalTravelCost] = useState<number>(800);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!loading && !user) router.push("/login");
-  }, [user, loading, router]);
+  // 🟢 AFTER: Check authentication & block this specific email
+useEffect(() => {
+  if (!loading && !user) {
+    router.push("/login");
+    return;
+  }
+
+  // 🔴 BLOCK akashriturajbhartiya@gmail.com
+  const BLOCKED_EMAIL = "akashriturajbhartiya@gmail.com";
+  const userEmail = user?.email?.toLowerCase().trim();
+
+  if (!loading && userEmail === BLOCKED_EMAIL.toLowerCase()) {
+    alert("⛔ Unauthorized: You do not have permission to access the Labor Planner.");
+    router.push(handoverId ? `/handovers/${handoverId}` : "/handovers");
+  }
+}, [user, loading, router, handoverId]);
 
   useEffect(() => {
     const loadAllData = async () => {
       if (!handoverId) return;
+      // 🔴 ADD THIS CHECK: Don't load any labor data if it's the blocked user
+    const isBlocked = user?.email?.toLowerCase().trim() === "akashriturajbhartiya@gmail.com";
+    if (isBlocked) return;
       try {
         // 1. Fetch Handover
         const hSnap = await getDoc(doc(db, "handovers", handoverId));
@@ -195,6 +211,11 @@ export default function WeddingLaborPlannerPage() {
 
   // Save to Firebase Handover
   const handleSaveLaborPlan = async () => {
+     // 🔴 ADD THIS SAFETY GUARD:
+  if (user?.email?.toLowerCase().trim() === "akashriturajbhartiya@gmail.com") {
+    alert("⛔ Access Denied: You are not authorized to save labor plans.");
+    return;
+  }
     setSaving(true);
     try {
       await updateDoc(doc(db, "handovers", handoverId), {
@@ -218,9 +239,32 @@ export default function WeddingLaborPlannerPage() {
     window.print();
   };
 
-  if (loading || !handover) {
-    return <div className="p-12 text-center text-xl font-bold">Loading Labor Planner...</div>;
-  }
+  // 🟢 AFTER: Show loading OR Access Denied screen
+const isBlockedUser = user?.email?.toLowerCase().trim() === "akashriturajbhartiya@gmail.com";
+
+if (isBlockedUser) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-slate-100 font-sans">
+      <div className="bg-white p-8 rounded-2xl border-2 border-red-300 shadow-xl max-w-md space-y-4">
+        <span className="text-4xl">⛔</span>
+        <h2 className="text-2xl font-black text-red-900">Access Denied</h2>
+        <p className="text-sm font-semibold text-gray-600">
+          Your account (<strong>{user?.email}</strong>) is restricted from accessing the Wedding Labor Planner.
+        </p>
+        <button
+          onClick={() => router.push(`/handovers/${handoverId}`)}
+          className="bg-gray-900 hover:bg-black text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow"
+        >
+          ← Return to Handover
+        </button>
+      </div>
+    </div>
+  );
+}
+
+if (loading || !handover) {
+  return <div className="p-12 text-center text-xl font-bold">Loading Labor Planner...</div>;
+}
 
   // =========================================================================
   // FINANCIAL CALCULATIONS & BUDGET SUMMARY
