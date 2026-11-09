@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 import { db } from "../../../../lib/firebase";
-import { collection, addDoc, doc, updateDoc } from "firebase/firestore";
+import { collection, addDoc, doc, updateDoc, setDoc } from "firebase/firestore";
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -21,14 +21,17 @@ export async function POST(req: Request) {
     const client = twilio(accountSid, authToken);
 
     let cleanPhone = phone.replace(/[^0-9]/g, "");
+    if (cleanPhone.length === 11 && cleanPhone.startsWith("0")) cleanPhone = cleanPhone.slice(1);
     if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+    const tenDigit = cleanPhone.slice(-10);
 
     const formattedTo = `whatsapp:+${cleanPhone}`;
     const formattedFrom = fromWhatsAppNumber?.startsWith("whatsapp:")
       ? fromWhatsAppNumber
       : `whatsapp:${fromWhatsAppNumber}`;
 
-    const callbackUrl = `https://brajwal.com/api/twilio/status?handoverId=${handoverId}&guestId=${guestId}`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://brajwal.com";
+    const callbackUrl = `${baseUrl}/api/twilio/status?handoverId=${handoverId}&guestId=${guestId}`;
 
     const messageOptions: any = {
       from: formattedFrom,
@@ -56,6 +59,13 @@ export async function POST(req: Request) {
       lastMessageAt: new Date().toISOString(),
       whatsappStatus: "sent",
     });
+
+    // Update phone routing so replies route to this wedding
+    await setDoc(doc(db, "phone_routing", tenDigit), {
+      handoverId,
+      guestId,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
 
     return NextResponse.json({ success: true, sid: response.sid });
   } catch (err: any) {

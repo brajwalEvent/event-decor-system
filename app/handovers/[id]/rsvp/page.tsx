@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { db, storage } from "../../../../lib/firebase";
 import { 
@@ -28,51 +28,78 @@ export default function WeddingRsvpPage() {
   const [uploadingExcel, setUploadingExcel] = useState(false);
   const [sendingWhatsappId, setSendingWhatsappId] = useState<string | null>(null);
 
-  // Search & Filter
+  // FAMILY / PARENTS CONFIGURATION FOR REGARDS
+  const [brideParents, setBrideParents] = useState("");
+  const [groomParents, setGroomParents] = useState("");
+  const [isSavingParents, setIsSavingParents] = useState(false);
+
+  // SEARCH & MULTI-FILTER STATE
   const [searchQuery, setSearchQuery] = useState("");
+  const [sideFilter, setSideFilter] = useState("All"); // All | Bride | Groom
+  const [resortFilter, setResortFilter] = useState("All");
+  const [checkInFilter, setCheckInFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
 
   // BULK SELECTION & ACTIONS
   const [selectedGuestIds, setSelectedGuestIds] = useState<Set<string>>(new Set());
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // CUSTOM APPROVED TEMPLATE BUILDER MODAL
   const [showBulkTemplateModal, setShowBulkTemplateModal] = useState(false);
   const [customTemplateSid, setCustomTemplateSid] = useState("");
-  const [customTemplateVar1, setCustomTemplateVar1] = useState("GuestName");
-  const [customTemplateVar2, setCustomTemplateVar2] = useState("ResortName");
-  const [customTemplateVar3, setCustomTemplateVar3] = useState("WeddingTitle");
+  const [customVarCount, setCustomVarCount] = useState<number>(0);
+  const [customVarMappings, setCustomVarMappings] = useState<Array<{ type: string; customText: string }>>([
+    { type: "GuestName", customText: "" },
+    { type: "ParentsRegards", customText: "" },
+    { type: "ResortName", customText: "" },
+    { type: "WeddingTitle", customText: "" },
+    { type: "CheckInDate", customText: "" },
+  ]);
 
   // BULK DELETE VERIFICATION MODAL
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeletingBulk, setIsDeletingBulk] = useState(false);
 
+  // EXCEL IMPORT MODAL
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importSideChoice, setImportSideChoice] = useState<"Bride" | "Groom">("Bride");
+  const [importDefaultResort, setImportDefaultResort] = useState("");
+  const [importDefaultCheckInRaw, setImportDefaultCheckInRaw] = useState("");
+
   // EDIT GUEST MODAL
   const [editingGuest, setEditingGuest] = useState<any | null>(null);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
+  const [editSide, setEditSide] = useState<"Bride" | "Groom">("Bride");
+  const [editResort, setEditResort] = useState("");
+  const [editDateRaw, setEditDateRaw] = useState(""); // YYYY-MM-DD
   const [editAdults, setEditAdults] = useState<number>(2);
   const [editMinors, setEditMinors] = useState<number>(0);
   const [editNotes, setEditNotes] = useState("");
   const [savingEditGuest, setSavingEditGuest] = useState(false);
 
-  // Manual Add Modal
+  // MANUAL ADD GUEST MODAL
   const [showManualAddModal, setShowManualAddModal] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
+  const [manualSide, setManualSide] = useState<"Bride" | "Groom">("Bride");
+  const [manualResort, setManualResort] = useState("");
+  const [manualDateRaw, setManualDateRaw] = useState(""); // YYYY-MM-DD
   const [manualAdults, setManualAdults] = useState<number>(2);
   const [manualMinors, setManualMinors] = useState<number>(0);
   const [manualNotes, setManualNotes] = useState("");
   const [savingManualGuest, setSavingManualGuest] = useState(false);
 
-  // ATTENDEE & ID ASSIGNMENT POP-UP
+  // ATTENDEE & ID ASSIGNMENT MODAL
   const [selectedAttendeeGuest, setSelectedAttendeeGuest] = useState<any | null>(null);
   const [newAttendeeName, setNewAttendeeName] = useState("");
   const [newAttendeeAgeGroup, setNewAttendeeAgeGroup] = useState("Adult");
   const [savingAttendees, setSavingAttendees] = useState(false);
 
   // -------------------------------------------------------------
-  // MULTI-CROP STATE
+  // MULTI-CROP ENGINE STATE
   // -------------------------------------------------------------
   const [croppingPdfUrl, setCroppingPdfUrl] = useState<string | null>(null);
   const [croppingPdfDoc, setCroppingPdfDoc] = useState<any | null>(null);
@@ -85,7 +112,6 @@ export default function WeddingRsvpPage() {
   const [isDraggingCrop, setIsDraggingCrop] = useState(false);
   const [dragStartPoint, setDragStartPoint] = useState<{ x: number; y: number } | null>(null);
 
-  // Cropped items collection tray
   interface CroppedTrayItem {
     id: string;
     dataUrl: string;
@@ -95,8 +121,6 @@ export default function WeddingRsvpPage() {
   const [croppedTray, setCroppedTray] = useState<CroppedTrayItem[]>([]);
   const [showSaveCropChoiceModal, setShowSaveCropChoiceModal] = useState(false);
   const [isSavingCrops, setIsSavingCrops] = useState(false);
-  
-  // Specific old crops selected for replacement
   const [selectedOldCropsToReplace, setSelectedOldCropsToReplace] = useState<Set<string>>(new Set());
 
   // WHATSAPP WEB STYLE CHAT
@@ -116,14 +140,15 @@ export default function WeddingRsvpPage() {
   const [pendingFileCaption, setPendingFileCaption] = useState("");
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
-  // VOICE RECORDER (MP4)
+  // VOICE RECORDER (MP4 / WEBM)
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<any>(null);
+  const recordedMimeTypeRef = useRef<string>("audio/webm");
 
-  // Lightbox / Document Preview
+  // LIGHTBOX / PREVIEW
   const [activeLightboxImg, setActiveLightboxImg] = useState<string | null>(null);
   const [activeLightboxDoc, setActiveLightboxDoc] = useState<string | null>(null);
 
@@ -131,12 +156,69 @@ export default function WeddingRsvpPage() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
+  // DATE HELPERS
+  const toISODate = (d: Date): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const toReadableDate = (isoOrDateStr: string): string => {
+    if (!isoOrDateStr) return "";
+    const d = new Date(isoOrDateStr);
+    if (isNaN(d.getTime())) return isoOrDateStr;
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }); // e.g. "30 Nov 2025"
+  };
+
+  // Constrain selectable date range (7 days before wedding start to 3 days after)
+  const allowedDateRange = useMemo(() => {
+    const defaultDate = new Date();
+    const base = handover?.startDate ? new Date(handover.startDate) : defaultDate;
+    const validBase = isNaN(base.getTime()) ? defaultDate : base;
+
+    const min = new Date(validBase);
+    min.setDate(min.getDate() - 7);
+
+    const max = new Date(validBase);
+    max.setDate(max.getDate() + 3);
+
+    const d0 = new Date(validBase);
+    d0.setDate(d0.getDate() - 1);
+
+    const d1 = new Date(validBase);
+
+    const d2 = new Date(validBase);
+    d2.setDate(d2.getDate() + 1);
+
+    return {
+      min: toISODate(min),
+      max: toISODate(max),
+      day0Iso: toISODate(d0),
+      day1Iso: toISODate(d1),
+      day2Iso: toISODate(d2),
+      day0Label: toReadableDate(toISODate(d0)),
+      day1Label: toReadableDate(toISODate(d1)),
+      day2Label: toReadableDate(toISODate(d2)),
+    };
+  }, [handover?.startDate]);
+
   // Realtime onSnapshot listener for Handover and Guests
   useEffect(() => {
     if (!handoverId) return;
 
     getDoc(doc(db, "handovers", handoverId)).then((snap) => {
-      if (snap.exists()) setHandover(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        setHandover(data);
+        setBrideParents(data.brideParents || "");
+        setGroomParents(data.groomParents || "");
+        setImportDefaultResort(data.resortName || "Main Resort");
+      }
     });
 
     const q = query(collection(db, "handovers", handoverId, "rsvps"), orderBy("name", "asc"));
@@ -149,16 +231,30 @@ export default function WeddingRsvpPage() {
         return liveGuests.find((g) => g.id === prev.id) || prev;
       });
 
+      // Avoid overwriting state while actively editing attendees
       setSelectedAttendeeGuest((prev: any) => {
         if (!prev) return null;
-        return liveGuests.find((g) => g.id === prev.id) || prev;
+        return prev;
       });
     });
 
     return () => unsubscribe();
   }, [handoverId]);
 
-  // Smart PDF & Media Helper
+  useEffect(() => {
+    if (allowedDateRange.day1Iso) {
+      if (!importDefaultCheckInRaw) setImportDefaultCheckInRaw(allowedDateRange.day1Iso);
+      if (!manualDateRaw) setManualDateRaw(allowedDateRange.day1Iso);
+    }
+  }, [allowedDateRange]);
+
+  const cleanPhoneNumber = (val: any): string => {
+    if (!val) return "";
+    let s = String(val).replace(/[^0-9]/g, "");
+    if (s.length === 11 && s.startsWith("0")) s = s.slice(1);
+    return s;
+  };
+
   const isPdfFile = (url: string, msgBody?: string) => {
     const u = (url || "").toLowerCase();
     const b = (msgBody || "").toLowerCase();
@@ -173,13 +269,6 @@ export default function WeddingRsvpPage() {
     return url;
   };
 
-  const cleanPhoneNumber = (val: any): string => {
-    if (!val) return "";
-    let s = String(val).replace(/[^0-9]/g, "");
-    if (s.length === 11 && s.startsWith("0")) s = s.slice(1);
-    return s;
-  };
-
   const scrollToLatestMessage = (smooth = false) => {
     setTimeout(() => {
       if (messagesEndRef.current) {
@@ -191,6 +280,7 @@ export default function WeddingRsvpPage() {
     }, 60);
   };
 
+  // Realtime messages for active chat
   useEffect(() => {
     if (!activeChatGuest || !handoverId) return;
 
@@ -220,7 +310,7 @@ export default function WeddingRsvpPage() {
     }
   }, [isChatModalOpen, activeChatGuest?.id]);
 
-  // DELIVERY TICKS SVG
+  // DELIVERY TICKS
   const renderMessageTicks = (status?: string) => {
     switch (status) {
       case "read":
@@ -262,7 +352,7 @@ export default function WeddingRsvpPage() {
   };
 
   // -------------------------------------------------------------
-  // MULTI-CROP ENGINE: LOADS VIA RAW BYTES (NO CORS / NO FAILED TO FETCH)
+  // REFINED PDF MULTI-CROP ENGINE (WITH FLAWLESS GLOBAL DRAGGING)
   // -------------------------------------------------------------
   const handleOpenPdfCropper = async (pdfUrl: string) => {
     setCroppingPdfUrl(pdfUrl);
@@ -274,9 +364,7 @@ export default function WeddingRsvpPage() {
     try {
       const proxyUrl = getMediaDisplayUrl(pdfUrl);
       const res = await fetch(proxyUrl);
-      if (!res.ok) {
-        throw new Error(`Failed to download PDF (HTTP ${res.status})`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const arrayBuffer = await res.arrayBuffer();
 
       if (!(window as any).pdfjsLib) {
@@ -292,12 +380,7 @@ export default function WeddingRsvpPage() {
       }
 
       const pdfjsLib = (window as any).pdfjsLib;
-
-      const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(arrayBuffer),
-      });
-
-      const pdf = await loadingTask.promise;
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
       setCroppingPdfDoc(pdf);
       setCropTotalPages(pdf.numPages);
       renderPdfPageToCropCanvas(pdf, 1);
@@ -346,39 +429,92 @@ export default function WeddingRsvpPage() {
     renderPdfPageToCropCanvas(croppingPdfDoc, prevP);
   };
 
-  // Mouse / Touch Selection Box
+  // Mouse & Touch down on canvas
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = cropCanvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
 
     setIsDraggingCrop(true);
     setDragStartPoint({ x, y });
     setCropRect({ x, y, w: 0, h: 0 });
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDraggingCrop || !dragStartPoint || !cropCanvasRef.current) return;
+  const handleCanvasTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = cropCanvasRef.current;
+    if (!canvas || e.touches.length === 0) return;
     const rect = canvas.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
-    const currentY = e.clientY - rect.top;
+    const touch = e.touches[0];
+    const x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
+    const y = Math.max(0, Math.min(touch.clientY - rect.top, rect.height));
 
-    const x = Math.min(dragStartPoint.x, currentX);
-    const y = Math.min(dragStartPoint.y, currentY);
-    const w = Math.abs(currentX - dragStartPoint.x);
-    const h = Math.abs(currentY - dragStartPoint.y);
-
-    setCropRect({ x, y, w, h });
+    setIsDraggingCrop(true);
+    setDragStartPoint({ x, y });
+    setCropRect({ x, y, w: 0, h: 0 });
   };
 
-  const handleCanvasMouseUp = () => {
-    setIsDraggingCrop(false);
-  };
+  // Global mousemove & mouseup listener while dragging so box never breaks
+  useEffect(() => {
+    if (!isDraggingCrop) return;
 
-  // Extract selected area to Tray (Allows multiple crops on the same page)
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      const canvas = cropCanvasRef.current;
+      if (!canvas || !dragStartPoint) return;
+      const rect = canvas.getBoundingClientRect();
+
+      const currentX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const currentY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+
+      const x = Math.min(dragStartPoint.x, currentX);
+      const y = Math.min(dragStartPoint.y, currentY);
+      const w = Math.abs(currentX - dragStartPoint.x);
+      const h = Math.abs(currentY - dragStartPoint.y);
+
+      setCropRect({ x, y, w, h });
+    };
+
+    const handleGlobalMouseUp = () => {
+      setIsDraggingCrop(false);
+    };
+
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 0) return;
+      const canvas = cropCanvasRef.current;
+      if (!canvas || !dragStartPoint) return;
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+
+      const currentX = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
+      const currentY = Math.max(0, Math.min(touch.clientY - rect.top, rect.height));
+
+      const x = Math.min(dragStartPoint.x, currentX);
+      const y = Math.min(dragStartPoint.y, currentY);
+      const w = Math.abs(currentX - dragStartPoint.x);
+      const h = Math.abs(currentY - dragStartPoint.y);
+
+      setCropRect({ x, y, w, h });
+    };
+
+    const handleGlobalTouchEnd = () => {
+      setIsDraggingCrop(false);
+    };
+
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    window.addEventListener("touchmove", handleGlobalTouchMove);
+    window.addEventListener("touchend", handleGlobalTouchEnd);
+
+    return () => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+      window.removeEventListener("touchmove", handleGlobalTouchMove);
+      window.removeEventListener("touchend", handleGlobalTouchEnd);
+    };
+  }, [isDraggingCrop, dragStartPoint]);
+
+  // Extract selected area to Tray
   const handleAddCropToTray = () => {
     const canvas = cropCanvasRef.current;
     if (!canvas) return;
@@ -425,31 +561,23 @@ export default function WeddingRsvpPage() {
     setCroppedTray((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // -------------------------------------------------------------
-  // SMART SAVE LOGIC: FIRST-TIME DIRECT SAVE VS GRANULAR REPLACEMENT
-  // -------------------------------------------------------------
-  
   // Helper to get previous crops for the active PDF
   const getExistingCropsForActivePdf = (): string[] => {
     if (!selectedAttendeeGuest || !croppingPdfUrl) return [];
     const existingCropMap = selectedAttendeeGuest.pdfCropMap || {};
     const previousCropsForThisPdf: string[] = existingCropMap[croppingPdfUrl] || [];
-    // Only return ones still present in the guest's idCardUrls
     return previousCropsForThisPdf.filter((url) =>
       (selectedAttendeeGuest.idCardUrls || []).includes(url)
     );
   };
 
-  // Clicked "Save & Attach ID Cards"
   const handleInitiateSaveCrops = () => {
     if (croppedTray.length === 0) return;
     const existingCrops = getExistingCropsForActivePdf();
 
     if (existingCrops.length === 0) {
-      // FIRST TIME CROPPING: Save directly without any prompt!
       handleExecuteSaveCrops([]);
     } else {
-      // PREVIOUS CROPS EXIST: Open granular replace modal
       setSelectedOldCropsToReplace(new Set());
       setShowSaveCropChoiceModal(true);
     }
@@ -464,7 +592,7 @@ export default function WeddingRsvpPage() {
     });
   };
 
-  // Core execution: Uploads to Firebase Storage and modifies Firestore
+  // Upload crops to Firebase Storage & update Firestore
   const handleExecuteSaveCrops = async (urlsToReplace: string[]) => {
     if (!selectedAttendeeGuest || !croppingPdfUrl || croppedTray.length === 0) return;
 
@@ -485,20 +613,16 @@ export default function WeddingRsvpPage() {
         uploadedImageUrls.push(downloadUrl);
       }
 
-      // Filter out only the selected replaced URLs from idCardUrls
       let updatedIdUrls = (selectedAttendeeGuest.idCardUrls || []).filter(
         (u: string) => !urlsToReplace.includes(u)
       );
-      // Append the newly cropped ones
       updatedIdUrls = [...updatedIdUrls, ...uploadedImageUrls];
 
-      // Remove replaced URLs from attendees assignments
       const updatedAttendees = (selectedAttendeeGuest.attendees || []).map((att: any) => ({
         ...att,
         assignedIdUrls: (att.assignedIdUrls || []).filter((u: string) => !urlsToReplace.includes(u)),
       }));
 
-      // Update mapping history
       const existingCropMap = selectedAttendeeGuest.pdfCropMap || {};
       const remainingOldCrops = (existingCropMap[croppingPdfUrl] || []).filter(
         (u: string) => !urlsToReplace.includes(u)
@@ -513,15 +637,17 @@ export default function WeddingRsvpPage() {
         },
       });
 
+      setSelectedAttendeeGuest((prev: any) => ({
+        ...prev,
+        idCardUrls: updatedIdUrls,
+        attendees: updatedAttendees,
+      }));
+
       setCroppingPdfUrl(null);
       setCroppedTray([]);
       setSelectedOldCropsToReplace(new Set());
 
-      const replaceMsg =
-        urlsToReplace.length > 0
-          ? ` and replaced ${urlsToReplace.length} old card(s)`
-          : "";
-      alert(`Success! Saved ${uploadedImageUrls.length} extracted ID card(s)${replaceMsg}. You can now assign them directly to each attendee.`);
+      alert(`Success! Saved ${uploadedImageUrls.length} extracted ID card(s). You can now assign them directly to each attendee.`);
     } catch (err: any) {
       console.error(err);
       alert("Error saving cropped images: " + (err.message || "Failed"));
@@ -530,9 +656,88 @@ export default function WeddingRsvpPage() {
     }
   };
 
-  // SEND SINGLE ID REQUEST
+  // -------------------------------------------------------------
+  // WHATSAPP CHAT DRAWER: MOST RECENT GUEST AT THE TOP
+  // -------------------------------------------------------------
+  const sortedChatGuests = useMemo(() => {
+    return [...guests].sort((a, b) => {
+      const timeA = new Date(a.lastMessageAt || a.whatsappSentAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.lastMessageAt || b.whatsappSentAt || b.createdAt || 0).getTime();
+      return timeB - timeA; // Descending: Most recent on top
+    });
+  }, [guests]);
+
+  const filteredChatGuests = useMemo(() => {
+    if (!chatSearchQuery.trim()) return sortedChatGuests;
+    const q = chatSearchQuery.toLowerCase();
+    return sortedChatGuests.filter(
+      (g) => g.name?.toLowerCase().includes(q) || g.phone?.includes(q)
+    );
+  }, [sortedChatGuests, chatSearchQuery]);
+
+  // Parents save handler
+  const handleSaveParentsConfig = async () => {
+    setIsSavingParents(true);
+    try {
+      await updateDoc(doc(db, "handovers", handoverId), {
+        brideParents: brideParents.trim(),
+        groomParents: groomParents.trim(),
+      });
+      alert("Family parents names saved successfully!");
+    } catch (err) {
+      alert("Error saving parent details.");
+    } finally {
+      setIsSavingParents(false);
+    }
+  };
+
+  const getParentsForGuest = (guest: any) => {
+    if (guest.side === "Groom") {
+      return groomParents.trim() || handover?.groomParents || "Groom's Parents";
+    }
+    return brideParents.trim() || handover?.brideParents || "Bride's Parents";
+  };
+
+  // Multi-filter directory list
+  const availableResorts = useMemo(() => {
+    const set = new Set<string>();
+    if (handover?.resortName) set.add(handover.resortName);
+    guests.forEach((g) => {
+      if (g.stayResort) set.add(g.stayResort);
+    });
+    return Array.from(set);
+  }, [guests, handover]);
+
+  const availableCheckIns = useMemo(() => {
+    const set = new Set<string>();
+    set.add(allowedDateRange.day0Label);
+    set.add(allowedDateRange.day1Label);
+    set.add(allowedDateRange.day2Label);
+    guests.forEach((g) => {
+      if (g.checkInDate) set.add(g.checkInDate);
+    });
+    return Array.from(set);
+  }, [guests, allowedDateRange]);
+
+  const filteredGuests = guests.filter((g) => {
+    const matchSide = sideFilter === "All" || (g.side || "Bride") === sideFilter;
+    const matchResort = resortFilter === "All" || (g.stayResort || handover?.resortName || "Main Resort") === resortFilter;
+    const matchCheckIn = checkInFilter === "All" || (g.checkInDate || allowedDateRange.day1Label) === checkInFilter;
+    const matchStatus = statusFilter === "All" || g.status === statusFilter;
+    const matchSearch =
+      !searchQuery ||
+      g.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.phone?.includes(searchQuery);
+    return matchSide && matchResort && matchCheckIn && matchStatus && matchSearch;
+  });
+
+  // SEND DEFAULT ID REQUEST
   const handleSendWhatsApp = async (guest: any) => {
     setSendingWhatsappId(guest.id);
+    const parentsName = getParentsForGuest(guest);
+    const guestResort = guest.stayResort || handover?.resortName || "the resort";
+    const guestCheckIn = guest.checkInDate || allowedDateRange.day1Label;
+
     try {
       const res = await fetch("/api/twilio/send", {
         method: "POST",
@@ -541,31 +746,17 @@ export default function WeddingRsvpPage() {
           phone: guest.phone,
           guestName: guest.name,
           weddingTitle: handover?.title || "the wedding",
-          resortName: handover?.resortName || "the resort",
+          resortName: guestResort,
+          checkInDate: guestCheckIn,
+          side: guest.side || "Bride",
+          regardsName: parentsName,
           handoverId,
           guestId: guest.id,
         }),
       });
 
       const result = await res.json();
-      if (result.success) {
-        await addDoc(collection(db, "handovers", handoverId, "rsvps", guest.id, "messages"), {
-          direction: "outbound",
-          body: result.formattedText,
-          sid: result.sid,
-          status: "sent",
-          timestamp: new Date().toISOString(),
-          senderName: "Team Brajwal (ID Request)",
-        });
-
-        await updateDoc(doc(db, "handovers", handoverId, "rsvps", guest.id), {
-          whatsappSentAt: new Date().toISOString(),
-          whatsappStatus: "sent",
-          status: guest.status === "Pending Call" ? "ID Requested" : guest.status,
-          lastMessage: "Official ID Request Template sent",
-          lastMessageAt: new Date().toISOString(),
-        });
-      } else {
+      if (!result.success) {
         alert(`Failed: ${result.error}`);
       }
     } catch (err) {
@@ -575,16 +766,288 @@ export default function WeddingRsvpPage() {
     }
   };
 
-  // EDIT CONTACT / PAX MODAL HANDLERS
+  // BULK SEND ID REQUEST
+  const handleBulkSendIdRequest = async () => {
+    if (selectedGuestIds.size === 0) return;
+    if (!window.confirm(`Send Meta Approved WhatsApp ID request to ${selectedGuestIds.size} selected guests?`)) return;
+
+    setIsBulkRunning(true);
+    const targetGuests = guests.filter((g) => selectedGuestIds.has(g.id));
+    setBulkProgress({ current: 0, total: targetGuests.length });
+
+    let sentCount = 0;
+    for (let i = 0; i < targetGuests.length; i++) {
+      const guest = targetGuests[i];
+      setBulkProgress({ current: i + 1, total: targetGuests.length });
+      try {
+        await handleSendWhatsApp(guest);
+        sentCount++;
+      } catch (err) {
+        console.error(err);
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    setIsBulkRunning(false);
+    setBulkProgress(null);
+    alert(`Bulk Send Complete! Sent to ${sentCount} of ${targetGuests.length} guests.`);
+  };
+
+  // BULK SEND CUSTOM META APPROVED TEMPLATE
+  const handleBulkSendCustomTemplate = async () => {
+    if (!customTemplateSid.trim()) {
+      alert("Please enter a valid Twilio Template Content SID (starts with HX...).");
+      return;
+    }
+
+    const targetGuests = guests.filter((g) => selectedGuestIds.has(g.id));
+    if (targetGuests.length === 0) return;
+
+    setIsBulkRunning(true);
+    setShowBulkTemplateModal(false);
+    setBulkProgress({ current: 0, total: targetGuests.length });
+
+    let sentCount = 0;
+    for (let i = 0; i < targetGuests.length; i++) {
+      const guest = targetGuests[i];
+      setBulkProgress({ current: i + 1, total: targetGuests.length });
+
+      const guestResort = guest.stayResort || handover?.resortName || "the resort";
+      const guestCheckIn = guest.checkInDate || allowedDateRange.day1Label;
+      const guestParents = getParentsForGuest(guest);
+
+      const dynamicVars: Record<string, string> = {};
+      for (let idx = 0; idx < customVarCount; idx++) {
+        const mapping = customVarMappings[idx];
+        const placeholderKey = String(idx + 1);
+
+        switch (mapping.type) {
+          case "GuestName": dynamicVars[placeholderKey] = guest.name; break;
+          case "ParentsRegards": dynamicVars[placeholderKey] = guestParents; break;
+          case "ResortName": dynamicVars[placeholderKey] = guestResort; break;
+          case "CheckInDate": dynamicVars[placeholderKey] = guestCheckIn; break;
+          case "WeddingTitle": dynamicVars[placeholderKey] = handover?.title || "the wedding"; break;
+          case "GuestSide": dynamicVars[placeholderKey] = `${guest.side || "Bride"} Side`; break;
+          case "CustomText": dynamicVars[placeholderKey] = mapping.customText || ""; break;
+          default: dynamicVars[placeholderKey] = guest.name;
+        }
+      }
+
+      try {
+        const res = await fetch("/api/twilio/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: guest.phone,
+            guestName: guest.name,
+            weddingTitle: handover?.title || "the wedding",
+            resortName: guestResort,
+            checkInDate: guestCheckIn,
+            side: guest.side || "Bride",
+            regardsName: guestParents,
+            templateSid: customTemplateSid.trim(),
+            contentVariables: customVarCount > 0 ? dynamicVars : {},
+            handoverId,
+            guestId: guest.id,
+          }),
+        });
+
+        const result = await res.json();
+        if (result.success) sentCount++;
+      } catch (e) {
+        console.error(e);
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    setIsBulkRunning(false);
+    setBulkProgress(null);
+    alert(`Custom Template Sent! Successfully delivered to ${sentCount} of ${targetGuests.length} guests.`);
+  };
+
+  // BULK DELETE CONFIRM
+  const handleBulkDeleteConfirm = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== "DELETE") {
+      alert("Please type 'DELETE' exactly into the box to confirm deletion.");
+      return;
+    }
+
+    setIsDeletingBulk(true);
+    try {
+      const idsToDelete = Array.from(selectedGuestIds);
+      for (const id of idsToDelete) {
+        await deleteDoc(doc(db, "handovers", handoverId, "rsvps", id));
+      }
+      setSelectedGuestIds(new Set());
+      setShowBulkDeleteModal(false);
+      setDeleteConfirmText("");
+      alert(`Deleted ${idsToDelete.length} selected contacts.`);
+    } catch (err) {
+      alert("Error deleting contacts.");
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
+  // EXCEL IMPORT
+  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingExcel(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: "binary", raw: false });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+        let addedCount = 0;
+        for (const row of data) {
+          const keys = Object.keys(row);
+          const nameKey = keys.find((k) => /name|family|head|guest/i.test(k));
+          const phoneKey = keys.find((k) => /phone|mobile|contact|whatsapp|cell|tel|mob/i.test(k));
+          const paxKey = keys.find((k) => /pax|count|total|members/i.test(k));
+          const sideKey = keys.find((k) => /side|party|family\s*side|bride.*groom/i.test(k));
+          const resortKey = keys.find((k) => /resort|hotel|stay|venue|property/i.test(k));
+          const checkInKey = keys.find((k) => /check.*in|checkin|arrival|date|day/i.test(k));
+
+          const rawName = nameKey ? row[nameKey] : row["Name"] || row["Guest Name"] || "";
+          const rawPhone = phoneKey ? row[phoneKey] : row["Phone"] || row["Mobile"] || "";
+          const rawPax = paxKey ? row[paxKey] : row["Pax"] || 2;
+
+          let parsedSide = importSideChoice;
+          if (sideKey && row[sideKey]) {
+            const val = String(row[sideKey]).toLowerCase();
+            parsedSide = val.includes("groom") || val.includes("ladkewale") ? "Groom" : "Bride";
+          }
+
+          const parsedResort = resortKey && row[resortKey] ? String(row[resortKey]).trim() : importDefaultResort;
+
+          let parsedCheckIn = toReadableDate(importDefaultCheckInRaw);
+          if (checkInKey && row[checkInKey]) {
+            const rawCell = String(row[checkInKey]).trim();
+            if (/day[\s\-_]*(0|zero)/i.test(rawCell)) parsedCheckIn = allowedDateRange.day0Label;
+            else if (/day[\s\-_]*(1|one)/i.test(rawCell)) parsedCheckIn = allowedDateRange.day1Label;
+            else if (/day[\s\-_]*(2|two)/i.test(rawCell)) parsedCheckIn = allowedDateRange.day2Label;
+            else {
+              const directFormatted = toReadableDate(rawCell);
+              if (directFormatted) parsedCheckIn = directFormatted;
+            }
+          }
+
+          let cleanPhoneStr = cleanPhoneNumber(rawPhone);
+          const nameStr = String(rawName).trim();
+          const paxNum = parseInt(String(rawPax), 10) || 2;
+
+          if (nameStr && cleanPhoneStr) {
+            await addDoc(collection(db, "handovers", handoverId, "rsvps"), {
+              name: nameStr,
+              phone: cleanPhoneStr,
+              cleanPhone: cleanPhoneStr.slice(-10),
+              side: parsedSide,
+              stayResort: parsedResort || handover?.resortName || "Main Resort",
+              checkInDate: parsedCheckIn || allowedDateRange.day1Label,
+              invitedPax: paxNum,
+              adultsCount: paxNum,
+              minorsCount: 0,
+              totalPax: paxNum,
+              status: "Pending Call",
+              callNotes: "",
+              idCardUrls: [],
+              attendees: [
+                {
+                  id: `att_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                  name: nameStr,
+                  ageGroup: "Adult",
+                  assignedIdUrls: [],
+                },
+              ],
+              createdAt: new Date().toISOString(),
+            });
+            addedCount++;
+          }
+        }
+        setShowImportModal(false);
+        alert(`Successfully imported ${addedCount} guests for ${importSideChoice} Side!`);
+      } catch (err: any) {
+        alert(`Failed to parse file: ${err.message || "Invalid file format"}`);
+      } finally {
+        setUploadingExcel(false);
+        if (e.target) e.target.value = "";
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // MANUAL ADD
+  const handleManualAddGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualName.trim() || !manualPhone.trim()) return;
+
+    setSavingManualGuest(true);
+    try {
+      const total = Number(manualAdults) + Number(manualMinors);
+      const cleanPhone = cleanPhoneNumber(manualPhone);
+      const finalCheckInDate = toReadableDate(manualDateRaw) || allowedDateRange.day1Label;
+
+      await addDoc(collection(db, "handovers", handoverId, "rsvps"), {
+        name: manualName.trim(),
+        phone: manualPhone.trim(),
+        cleanPhone: cleanPhone.slice(-10),
+        side: manualSide,
+        stayResort: manualResort.trim() || handover?.resortName || "Main Resort",
+        checkInDate: finalCheckInDate,
+        invitedPax: total || 2,
+        adultsCount: manualAdults,
+        minorsCount: manualMinors,
+        totalPax: total,
+        status: "Pending Call",
+        callNotes: manualNotes.trim(),
+        idCardUrls: [],
+        attendees: [
+          {
+            id: `att_${Date.now()}`,
+            name: manualName.trim(),
+            ageGroup: "Adult",
+            assignedIdUrls: [],
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      });
+      setShowManualAddModal(false);
+      setManualName("");
+      setManualPhone("");
+      setManualNotes("");
+    } finally {
+      setSavingManualGuest(false);
+    }
+  };
+
+  // OPEN EDIT MODAL
   const handleOpenEditModal = (guest: any) => {
     setEditingGuest(guest);
     setEditName(guest.name || "");
     setEditPhone(guest.phone || "");
+    setEditSide(guest.side || "Bride");
+    setEditResort(guest.stayResort || handover?.resortName || "Main Resort");
+
+    let initialIso = allowedDateRange.day1Iso;
+    if (guest.checkInDate) {
+      const parsed = new Date(guest.checkInDate);
+      if (!isNaN(parsed.getTime())) {
+        initialIso = toISODate(parsed);
+      }
+    }
+    setEditDateRaw(initialIso);
     setEditAdults(guest.adultsCount ?? 2);
     setEditMinors(guest.minorsCount ?? 0);
     setEditNotes(guest.callNotes || "");
   };
 
+  // SAVE EDITED GUEST
   const handleSaveEditedGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingGuest || !editName.trim() || !editPhone.trim()) return;
@@ -593,6 +1056,7 @@ export default function WeddingRsvpPage() {
     try {
       const cleanPhone = cleanPhoneNumber(editPhone);
       const total = Math.max(0, Number(editAdults)) + Math.max(0, Number(editMinors));
+      const formattedDate = toReadableDate(editDateRaw) || allowedDateRange.day1Label;
 
       let updatedAttendees = editingGuest.attendees || [];
       if (updatedAttendees.length > 0 && updatedAttendees[0].name === editingGuest.name) {
@@ -603,6 +1067,9 @@ export default function WeddingRsvpPage() {
         name: editName.trim(),
         phone: editPhone.trim(),
         cleanPhone: cleanPhone.slice(-10),
+        side: editSide,
+        stayResort: editResort.trim(),
+        checkInDate: formattedDate,
         adultsCount: Math.max(0, Number(editAdults)),
         minorsCount: Math.max(0, Number(editMinors)),
         totalPax: total,
@@ -619,153 +1086,19 @@ export default function WeddingRsvpPage() {
     }
   };
 
-  // BULK SELECTION HANDLERS
-  const filteredGuests = guests.filter((g) => {
-    const matchStatus = statusFilter === "All" || g.status === statusFilter;
-    const matchSearch =
-      !searchQuery ||
-      g.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.phone?.includes(searchQuery);
-    return matchStatus && matchSearch;
-  });
-
-  const handleToggleSelectGuest = (id: string) => {
-    setSelectedGuestIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  const handleUpdateCounts = async (guestId: string, adults: number, minors: number, status: string, notes: string) => {
+    const total = Math.max(0, adults) + Math.max(0, minors);
+    await updateDoc(doc(db, "handovers", handoverId, "rsvps", guestId), {
+      adultsCount: Math.max(0, adults),
+      minorsCount: Math.max(0, minors),
+      totalPax: total,
+      status,
+      callNotes: notes,
+      updatedAt: new Date().toISOString(),
     });
   };
 
-  const handleSelectAll = () => {
-    setSelectedGuestIds(new Set(filteredGuests.map((g) => g.id)));
-  };
-
-  const handleDeselectAll = () => {
-    setSelectedGuestIds(new Set());
-  };
-
-  // BULK DELETE WITH VERIFICATION
-  const handleBulkDeleteConfirm = async () => {
-    if (deleteConfirmText.trim().toUpperCase() !== "DELETE") {
-      alert("Please type 'DELETE' exactly into the box to confirm deletion.");
-      return;
-    }
-
-    setIsDeletingBulk(true);
-    try {
-      const idsToDelete = Array.from(selectedGuestIds);
-      for (const id of idsToDelete) {
-        await deleteDoc(doc(db, "handovers", handoverId, "rsvps", id));
-      }
-      setSelectedGuestIds(new Set());
-      setShowBulkDeleteModal(false);
-      setDeleteConfirmText("");
-      alert(`Successfully deleted ${idsToDelete.length} contacts.`);
-    } catch (err) {
-      alert("Error deleting some contacts.");
-    } finally {
-      setIsDeletingBulk(false);
-    }
-  };
-
-  // BULK SEND ID REQUEST
-  const handleBulkSendIdRequest = async () => {
-    if (selectedGuestIds.size === 0) return;
-    if (!window.confirm(`Send WhatsApp ID request to ${selectedGuestIds.size} selected guests?`)) return;
-
-    setIsBulkRunning(true);
-    const targetGuests = guests.filter((g) => selectedGuestIds.has(g.id));
-    setBulkProgress({ current: 0, total: targetGuests.length });
-
-    let sentCount = 0;
-    for (let i = 0; i < targetGuests.length; i++) {
-      const guest = targetGuests[i];
-      setBulkProgress({ current: i + 1, total: targetGuests.length });
-      try {
-        await handleSendWhatsApp(guest);
-        sentCount++;
-      } catch (err) {
-        console.error(err);
-      }
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    setIsBulkRunning(false);
-    setBulkProgress(null);
-    alert(`Bulk Send Complete! Sent to ${sentCount} of ${targetGuests.length} guests.`);
-  };
-
-  // BULK SEND CUSTOM APPROVED TEMPLATE
-  const handleBulkSendCustomTemplate = async () => {
-    if (!customTemplateSid.trim()) {
-      alert("Please enter a valid Twilio Content/Template SID.");
-      return;
-    }
-    const targetGuests = guests.filter((g) => selectedGuestIds.has(g.id));
-    if (targetGuests.length === 0) return;
-
-    setIsBulkRunning(true);
-    setShowBulkTemplateModal(false);
-    setBulkProgress({ current: 0, total: targetGuests.length });
-
-    let sentCount = 0;
-    for (let i = 0; i < targetGuests.length; i++) {
-      const guest = targetGuests[i];
-      setBulkProgress({ current: i + 1, total: targetGuests.length });
-
-      const val1 = customTemplateVar1 === "GuestName" ? guest.name : customTemplateVar1 === "ResortName" ? handover?.resortName : handover?.title;
-      const val2 = customTemplateVar2 === "GuestName" ? guest.name : customTemplateVar2 === "ResortName" ? handover?.resortName : handover?.title;
-      const val3 = customTemplateVar3 === "GuestName" ? guest.name : customTemplateVar3 === "ResortName" ? handover?.resortName : handover?.title;
-
-      try {
-        const res = await fetch("/api/twilio/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phone: guest.phone,
-            guestName: guest.name,
-            weddingTitle: handover?.title || "the wedding",
-            resortName: handover?.resortName || "the resort",
-            templateSid: customTemplateSid.trim(),
-            contentVariables: { "1": val1, "2": val2, "3": val3 },
-            handoverId,
-            guestId: guest.id,
-          }),
-        });
-
-        const result = await res.json();
-        if (result.success) {
-          await addDoc(collection(db, "handovers", handoverId, "rsvps", guest.id, "messages"), {
-            direction: "outbound",
-            body: result.formattedText || `Template [${customTemplateSid.trim()}]`,
-            sid: result.sid,
-            status: "sent",
-            timestamp: new Date().toISOString(),
-            senderName: "Team Brajwal (Bulk Template)",
-          });
-
-          await updateDoc(doc(db, "handovers", handoverId, "rsvps", guest.id), {
-            whatsappSentAt: new Date().toISOString(),
-            whatsappStatus: "sent",
-            lastMessage: `Template [${customTemplateSid.trim().slice(-6)}] sent`,
-            lastMessageAt: new Date().toISOString(),
-          });
-          sentCount++;
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    setIsBulkRunning(false);
-    setBulkProgress(null);
-    alert(`Bulk Template Sent! Delivered to ${sentCount} of ${targetGuests.length} guests.`);
-  };
-
-  // SEND LIVE CHAT MESSAGE
+  // SEND LIVE CHAT
   const handleSendChatReply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInputText.trim() || !activeChatGuest) return;
@@ -801,79 +1134,20 @@ export default function WeddingRsvpPage() {
     }
   };
 
-  // ATTACHMENT HANDLERS
-  const handleSelectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setPendingFile(file);
-    setPendingFileCaption("");
-
-    if (file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setPendingFilePreview(ev.target?.result as string);
-      reader.readAsDataURL(file);
-    } else {
-      setPendingFilePreview(null);
-    }
-  };
-
-  const handleCancelAttachment = () => {
-    setPendingFile(null);
-    setPendingFilePreview(null);
-    setPendingFileCaption("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleConfirmSendAttachment = async () => {
-    if (!pendingFile || !activeChatGuest) return;
-
-    setUploadingAttachment(true);
-    try {
-      const fileRef = ref(storage, `chat_media/${handoverId}/${activeChatGuest.id}/${Date.now()}_${pendingFile.name}`);
-      await uploadBytes(fileRef, pendingFile, { contentType: pendingFile.type });
-      const downloadUrl = await getDownloadURL(fileRef);
-
-      const res = await fetch("/api/twilio/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          handoverId,
-          guestId: activeChatGuest.id,
-          phone: activeChatGuest.phone,
-          message: pendingFileCaption.trim(),
-          mediaUrl: downloadUrl,
-          fileName: pendingFile.name,
-        }),
-      });
-
-      const result = await res.json();
-      if (!result.success) {
-        alert(`Failed to send attachment: ${result.error}`);
-      } else {
-        handleCancelAttachment();
-        scrollToLatestMessage(true);
-      }
-    } catch (err) {
-      alert("Error sending attachment.");
-    } finally {
-      setUploadingAttachment(false);
-    }
-  };
-
-  // VOICE NOTE RECORDING
+  // VOICE RECORDING
   const startVoiceRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
 
-      const mimeType = MediaRecorder.isTypeSupported("audio/mp4")
+      const mime = MediaRecorder.isTypeSupported("audio/mp4")
         ? "audio/mp4"
         : MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
-        : "";
+        : "audio/webm";
 
-      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recordedMimeTypeRef.current = mime;
+      const mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -910,13 +1184,15 @@ export default function WeddingRsvpPage() {
     setIsRecording(false);
 
     mediaRecorderRef.current.onstop = async () => {
-      const audioBlob = new Blob(audioChunksRef.current, { type: "audio/mp4" });
+      const mime = recordedMimeTypeRef.current;
+      const ext = mime.includes("mp4") ? "mp4" : "webm";
+      const audioBlob = new Blob(audioChunksRef.current, { type: mime });
       audioChunksRef.current = [];
 
       setUploadingAttachment(true);
       try {
-        const fileRef = ref(storage, `chat_media/${handoverId}/${activeChatGuest.id}/${Date.now()}_voice.mp4`);
-        await uploadBytes(fileRef, audioBlob, { contentType: "audio/mp4" });
+        const fileRef = ref(storage, `chat_media/${handoverId}/${activeChatGuest.id}/${Date.now()}_voice.${ext}`);
+        await uploadBytes(fileRef, audioBlob, { contentType: mime });
         const downloadUrl = await getDownloadURL(fileRef);
 
         await fetch("/api/twilio/chat", {
@@ -928,7 +1204,7 @@ export default function WeddingRsvpPage() {
             phone: activeChatGuest.phone,
             message: "🎤 Voice Message",
             mediaUrl: downloadUrl,
-            fileName: "Voice Note.mp4",
+            fileName: `Voice Note.${ext}`,
           }),
         });
         scrollToLatestMessage(true);
@@ -1018,143 +1294,6 @@ export default function WeddingRsvpPage() {
     }
   };
 
-  const handleUpdateCounts = async (guestId: string, adults: number, minors: number, status: string, notes: string) => {
-    const total = Math.max(0, adults) + Math.max(0, minors);
-    await updateDoc(doc(db, "handovers", handoverId, "rsvps", guestId), {
-      adultsCount: Math.max(0, adults),
-      minorsCount: Math.max(0, minors),
-      totalPax: total,
-      status,
-      callNotes: notes,
-      updatedAt: new Date().toISOString(),
-    });
-  };
-
-  // MANUAL ADD GUEST
-  const handleManualAddGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualName.trim() || !manualPhone.trim()) return;
-
-    setSavingManualGuest(true);
-    try {
-      const total = Number(manualAdults) + Number(manualMinors);
-      const cleanPhone = cleanPhoneNumber(manualPhone);
-
-      await addDoc(collection(db, "handovers", handoverId, "rsvps"), {
-        name: manualName.trim(),
-        phone: manualPhone.trim(),
-        cleanPhone: cleanPhone.slice(-10),
-        invitedPax: total || 2,
-        adultsCount: manualAdults,
-        minorsCount: manualMinors,
-        totalPax: total,
-        status: "Pending Call",
-        callNotes: manualNotes.trim(),
-        idCardUrls: [],
-        attendees: [
-          {
-            id: `att_${Date.now()}`,
-            name: manualName.trim(),
-            ageGroup: "Adult",
-            assignedIdUrls: [],
-          },
-        ],
-        createdAt: new Date().toISOString(),
-      });
-      setShowManualAddModal(false);
-      setManualName("");
-      setManualPhone("");
-      setManualNotes("");
-    } finally {
-      setSavingManualGuest(false);
-    }
-  };
-
-  // EXCEL / CSV IMPORT
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploadingExcel(true);
-    const reader = new FileReader();
-
-    reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: "binary", raw: false });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-        let addedCount = 0;
-        for (const row of data) {
-          const keys = Object.keys(row);
-          const nameKey = keys.find((k) => /name|family|head|guest/i.test(k));
-          const phoneKey = keys.find((k) => /phone|mobile|contact|whatsapp|cell|tel|mob/i.test(k));
-          const paxKey = keys.find((k) => /pax|count|total|members/i.test(k));
-
-          const rawName = nameKey ? row[nameKey] : row["Name"] || row["Guest Name"] || "";
-          const rawPhone = phoneKey ? row[phoneKey] : row["Phone"] || row["Mobile"] || "";
-          const rawPax = paxKey ? row[paxKey] : row["Pax"] || 2;
-
-          let cleanPhoneStr = cleanPhoneNumber(rawPhone);
-          const nameStr = String(rawName).trim();
-          const paxNum = parseInt(String(rawPax), 10) || 2;
-
-          if (nameStr && cleanPhoneStr) {
-            await addDoc(collection(db, "handovers", handoverId, "rsvps"), {
-              name: nameStr,
-              phone: cleanPhoneStr,
-              cleanPhone: cleanPhoneStr.slice(-10),
-              invitedPax: paxNum,
-              adultsCount: paxNum,
-              minorsCount: 0,
-              totalPax: paxNum,
-              status: "Pending Call",
-              callNotes: "",
-              idCardUrls: [],
-              attendees: [
-                {
-                  id: `att_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                  name: nameStr,
-                  ageGroup: "Adult",
-                  assignedIdUrls: [],
-                },
-              ],
-              createdAt: new Date().toISOString(),
-            });
-            addedCount++;
-          }
-        }
-        alert(`Successfully imported ${addedCount} guests!`);
-      } catch (err: any) {
-        alert(`Failed to parse file: ${err.message || "Invalid file format"}`);
-      } finally {
-        setUploadingExcel(false);
-        if (e.target) e.target.value = "";
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  const handleDeleteGuest = async (id: string, name: string) => {
-    if (!window.confirm(`Delete ${name}?`)) return;
-    await deleteDoc(doc(db, "handovers", handoverId, "rsvps", id));
-  };
-
-  const handleOpenChatModal = (guest: any) => {
-    setActiveChatGuest(guest);
-    setIsChatModalOpen(true);
-    scrollToLatestMessage(false);
-  };
-
-  const filteredChatGuests = guests.filter((g) => {
-    if (!chatSearchQuery) return true;
-    return (
-      g.name?.toLowerCase().includes(chatSearchQuery.toLowerCase()) ||
-      g.phone?.includes(chatSearchQuery)
-    );
-  });
-
   if (loading || !handover) return <div className="p-12 text-center text-xl font-bold">Loading RSVP Center...</div>;
 
   return (
@@ -1176,15 +1315,15 @@ export default function WeddingRsvpPage() {
               </span>
             </h1>
             <p className="text-xs font-semibold text-gray-600 mt-0.5">
-              📍 {handover.resortName} | 📅 {handover.startDate} to {handover.endDate}
+              📍 {handover.resortName} | 📅 Wedding Dates: {allowedDateRange.day1Label} to {allowedDateRange.day2Label}
             </p>
           </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                setActiveChatGuest(guests[0] || null);
+                setActiveChatGuest(sortedChatGuests[0] || null);
                 setIsChatModalOpen(true);
-                scrollToLatestMessage(false);
               }}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2.5 rounded-lg text-xs shadow flex items-center gap-1.5"
             >
@@ -1195,6 +1334,42 @@ export default function WeddingRsvpPage() {
               className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2.5 rounded-lg text-xs shadow flex items-center gap-1.5"
             >
               🖨️ Export Dossier (PDF)
+            </button>
+          </div>
+        </div>
+
+        {/* BRIDE & GROOM PARENTS REGARDS BAR */}
+        <div className="bg-slate-50 border-t px-6 py-2">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto">
+              <span className="font-black text-gray-700 uppercase tracking-wide text-[10px]">
+                👨‍👩‍👧 Family Names for WhatsApp:
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-pink-700">👰 Bride's Mom & Dad:</span>
+                <input
+                  placeholder="e.g. Mr. & Mrs. Sharma"
+                  value={brideParents}
+                  onChange={(e) => setBrideParents(e.target.value)}
+                  className="border px-2 py-1 rounded font-semibold text-xs w-48 bg-white"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-blue-700">🤵 Groom's Mom & Dad:</span>
+                <input
+                  placeholder="e.g. Mr. & Mrs. Verma"
+                  value={groomParents}
+                  onChange={(e) => setGroomParents(e.target.value)}
+                  className="border px-2 py-1 rounded font-semibold text-xs w-48 bg-white"
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleSaveParentsConfig}
+              disabled={isSavingParents}
+              className="bg-gray-800 hover:bg-black text-white font-bold px-3 py-1 rounded text-[11px] shadow"
+            >
+              {isSavingParents ? "Saving..." : "Save Family Names"}
             </button>
           </div>
         </div>
@@ -1211,14 +1386,21 @@ export default function WeddingRsvpPage() {
         </div>
 
         <div className="space-y-8">
-          {guests.map((guest, idx) => (
+          {filteredGuests.map((guest, idx) => (
             <div key={guest.id} className="border-2 border-gray-400 rounded-lg p-5 page-break-inside-avoid">
               <div className="flex justify-between items-start border-b pb-2 mb-4 bg-gray-50 p-2 rounded">
                 <div>
-                  <h2 className="text-base font-black text-gray-900">
+                  <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
                     {idx + 1}. Family Head: {guest.name}
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-black uppercase ${
+                      guest.side === "Groom" ? "bg-blue-100 text-blue-900 border border-blue-300" : "bg-pink-100 text-pink-900 border border-pink-300"
+                    }`}>
+                      {guest.side === "Groom" ? "🤵 Groom Side" : "👰 Bride Side"}
+                    </span>
                   </h2>
-                  <p className="text-xs font-bold text-gray-700">Phone: {guest.phone}</p>
+                  <p className="text-xs font-bold text-gray-700 mt-0.5">
+                    Phone: {guest.phone} | Stay Resort: <strong>{guest.stayResort || handover.resortName}</strong> | Check-in: <strong>{guest.checkInDate || allowedDateRange.day1Label}</strong>
+                  </p>
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-black uppercase bg-gray-200 px-2 py-0.5 rounded">
@@ -1290,40 +1472,77 @@ export default function WeddingRsvpPage() {
 
       {/* Main Screen Body */}
       <div className="max-w-7xl mx-auto px-6 mt-6 space-y-4 no-print">
-        {/* Actions & Filters */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-xl border border-gray-300 shadow-sm">
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <input
-              placeholder="Search by Name or Mobile..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-72 border p-2 rounded-lg text-xs font-bold"
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="border p-2 rounded-lg text-xs font-bold bg-white"
-            >
-              <option value="All">All Statuses</option>
-              <option value="Pending Call">Pending Call</option>
-              <option value="ID Requested">ID Requested</option>
-              <option value="IDs Received">IDs Received</option>
-              <option value="Confirmed">Confirmed</option>
-              <option value="Declined">Declined</option>
-            </select>
-          </div>
+        {/* MULTI-FILTER BAR */}
+        <div className="bg-white p-4 rounded-xl border border-gray-300 shadow-sm space-y-3">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+              <input
+                placeholder="Search Name or Phone..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full sm:w-60 border p-2 rounded-lg text-xs font-bold"
+              />
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setShowManualAddModal(true)}
-              className="bg-purple-700 hover:bg-purple-800 text-white font-black px-3 py-2 rounded-lg text-xs shadow"
-            >
-              + Add Manually
-            </button>
-            <label className="bg-gray-100 border hover:bg-gray-200 text-gray-800 font-black px-3 py-2 rounded-lg text-xs cursor-pointer shadow">
-              {uploadingExcel ? "Importing Excel..." : "📥 Import Excel / CSV"}
-              <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
-            </label>
+              <select
+                value={sideFilter}
+                onChange={(e) => setSideFilter(e.target.value)}
+                className="border p-2 rounded-lg text-xs font-bold bg-white"
+              >
+                <option value="All">All Sides (Bride & Groom)</option>
+                <option value="Bride">👰 Bride Side Only</option>
+                <option value="Groom">🤵 Groom Side Only</option>
+              </select>
+
+              <select
+                value={resortFilter}
+                onChange={(e) => setResortFilter(e.target.value)}
+                className="border p-2 rounded-lg text-xs font-bold bg-white"
+              >
+                <option value="All">All Stay Resorts</option>
+                {availableResorts.map((r) => (
+                  <option key={r} value={r}>🏨 {r}</option>
+                ))}
+              </select>
+
+              <select
+                value={checkInFilter}
+                onChange={(e) => setCheckInFilter(e.target.value)}
+                className="border p-2 rounded-lg text-xs font-bold bg-white"
+              >
+                <option value="All">All Check-in Dates</option>
+                {availableCheckIns.map((c) => (
+                  <option key={c} value={c}>📅 {c}</option>
+                ))}
+              </select>
+
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="border p-2 rounded-lg text-xs font-bold bg-white"
+              >
+                <option value="All">All Statuses</option>
+                <option value="Pending Call">Pending Call</option>
+                <option value="ID Requested">ID Requested</option>
+                <option value="IDs Received">IDs Received</option>
+                <option value="Confirmed">Confirmed</option>
+                <option value="Declined">Declined</option>
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+              <button
+                onClick={() => setShowManualAddModal(true)}
+                className="bg-purple-700 hover:bg-purple-800 text-white font-black px-3 py-2 rounded-lg text-xs shadow"
+              >
+                + Add Guest
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="bg-gray-100 border hover:bg-gray-200 text-gray-800 font-black px-3 py-2 rounded-lg text-xs shadow flex items-center gap-1"
+              >
+                📥 Import Excel / CSV
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1334,10 +1553,7 @@ export default function WeddingRsvpPage() {
               <span className="bg-emerald-500 text-white text-xs font-black px-2.5 py-1 rounded-full">
                 {selectedGuestIds.size} Selected
               </span>
-              <button
-                onClick={handleDeselectAll}
-                className="text-xs text-purple-200 hover:text-white underline font-semibold"
-              >
+              <button onClick={() => setSelectedGuestIds(new Set())} className="text-xs text-purple-200 hover:text-white underline font-semibold">
                 Deselect All
               </button>
             </div>
@@ -1360,7 +1576,7 @@ export default function WeddingRsvpPage() {
                     onClick={() => setShowBulkTemplateModal(true)}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-black px-3 py-1.5 rounded-lg text-xs shadow"
                   >
-                    📢 Custom Template
+                    📢 Other Custom Template
                   </button>
                   <button
                     onClick={() => {
@@ -1369,7 +1585,7 @@ export default function WeddingRsvpPage() {
                     }}
                     className="bg-red-600 hover:bg-red-700 text-white font-black px-3 py-1.5 rounded-lg text-xs shadow flex items-center gap-1"
                   >
-                    🗑️ Delete Selected ({selectedGuestIds.size})
+                    🗑️ Delete Selected
                   </button>
                 </>
               )}
@@ -1377,7 +1593,7 @@ export default function WeddingRsvpPage() {
           </div>
         )}
 
-        {/* Directory Table */}
+        {/* DIRECTORY TABLE */}
         <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -1387,12 +1603,13 @@ export default function WeddingRsvpPage() {
                     <input
                       type="checkbox"
                       checked={filteredGuests.length > 0 && selectedGuestIds.size === filteredGuests.length}
-                      onChange={(e) => (e.target.checked ? handleSelectAll() : handleDeselectAll())}
+                      onChange={(e) => setSelectedGuestIds(e.target.checked ? new Set(filteredGuests.map((g) => g.id)) : new Set())}
                       className="cursor-pointer"
-                      title="Select / Deselect All Filtered"
                     />
                   </th>
                   <th className="p-3">Guest / Family Head</th>
+                  <th className="p-3 text-center">Side</th>
+                  <th className="p-3">Stay Resort & Check-in</th>
                   <th className="p-3 text-center">Pax</th>
                   <th className="p-3">Calling Notes</th>
                   <th className="p-3 text-center">Status</th>
@@ -1405,6 +1622,7 @@ export default function WeddingRsvpPage() {
               <tbody className="divide-y divide-gray-200">
                 {filteredGuests.map((guest) => {
                   const isChecked = selectedGuestIds.has(guest.id);
+                  const isGroom = guest.side === "Groom";
 
                   return (
                     <tr key={guest.id} className={`hover:bg-gray-50 ${isChecked ? "bg-purple-50/60" : ""}`}>
@@ -1412,7 +1630,14 @@ export default function WeddingRsvpPage() {
                         <input
                           type="checkbox"
                           checked={isChecked}
-                          onChange={() => handleToggleSelectGuest(guest.id)}
+                          onChange={() => {
+                            setSelectedGuestIds((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(guest.id)) n.delete(guest.id);
+                              else n.add(guest.id);
+                              return n;
+                            });
+                          }}
                           className="cursor-pointer"
                         />
                       </td>
@@ -1420,12 +1645,28 @@ export default function WeddingRsvpPage() {
                       <td className="p-3">
                         <button
                           onClick={() => handleOpenAttendeeModal(guest)}
-                          className="font-black text-sm text-purple-900 hover:underline hover:text-purple-700 text-left block"
-                          title="Click to view & assign family members and IDs"
+                          className="font-black text-sm text-purple-900 hover:underline text-left block"
                         >
-                          {guest.name} 👤
+                          {guest.name}
                         </button>
-                        <p className="text-gray-500 font-mono">{guest.phone}</p>
+                        <p className="text-gray-500 font-mono text-[11px]">{guest.phone}</p>
+                      </td>
+
+                      <td className="p-3 text-center">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase border ${
+                          isGroom ? "bg-blue-50 text-blue-800 border-blue-200" : "bg-pink-50 text-pink-800 border-pink-200"
+                        }`}>
+                          {isGroom ? "🤵 Groom" : "👰 Bride"}
+                        </span>
+                      </td>
+
+                      <td className="p-3">
+                        <span className="font-bold text-gray-900 block truncate max-w-[150px]">
+                          🏨 {guest.stayResort || handover.resortName}
+                        </span>
+                        <span className="text-[10px] text-gray-600 block mt-0.5 font-semibold">
+                          📅 Check-in: <strong className="text-purple-900">{guest.checkInDate || allowedDateRange.day1Label}</strong>
+                        </span>
                       </td>
 
                       <td className="p-3 text-center font-bold">
@@ -1437,7 +1678,7 @@ export default function WeddingRsvpPage() {
 
                       <td className="p-3">
                         <input
-                          placeholder="Arrival notes..."
+                          placeholder="Notes..."
                           value={guest.callNotes || ""}
                           onChange={(e) =>
                             handleUpdateCounts(guest.id, guest.adultsCount || 2, guest.minorsCount || 0, guest.status, e.target.value)
@@ -1470,15 +1711,17 @@ export default function WeddingRsvpPage() {
                         >
                           {sendingWhatsappId === guest.id ? "Sending..." : "📲 Send ID Request"}
                         </button>
-                        <div className="flex items-center gap-1 text-[10px] mt-1 text-gray-500">
-                          {renderMessageTicks(guest.whatsappStatus)}
-                          <span>{guest.whatsappStatus ? `(${guest.whatsappStatus})` : "Not sent"}</span>
+                        <div className="text-[10px] mt-1 text-gray-500 font-mono">
+                          {guest.whatsappStatus ? `Status: ${guest.whatsappStatus}` : "Not sent yet"}
                         </div>
                       </td>
 
                       <td className="p-3">
                         <button
-                          onClick={() => handleOpenChatModal(guest)}
+                          onClick={() => {
+                            setActiveChatGuest(guest);
+                            setIsChatModalOpen(true);
+                          }}
                           className="bg-purple-600 hover:bg-purple-700 text-white font-black px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow"
                         >
                           💬 Chat
@@ -1494,7 +1737,7 @@ export default function WeddingRsvpPage() {
                           className="text-xs font-bold text-gray-700 hover:text-purple-700 flex items-center gap-1.5"
                         >
                           <span className="bg-purple-100 text-purple-900 px-2 py-0.5 rounded font-black">
-                            {guest.attendees?.length || 1} Person(s)
+                            {guest.attendees?.length || 1} Pax
                           </span>
                           <span className="text-gray-400">|</span>
                           <span className="text-emerald-700 font-bold">
@@ -1503,7 +1746,6 @@ export default function WeddingRsvpPage() {
                         </button>
                       </td>
 
-                      {/* EDIT & DELETE ACTIONS */}
                       <td className="p-3 text-right whitespace-nowrap">
                         <button
                           onClick={() => handleOpenEditModal(guest)}
@@ -1512,7 +1754,11 @@ export default function WeddingRsvpPage() {
                           ✏️ Edit
                         </button>
                         <button
-                          onClick={() => handleDeleteGuest(guest.id, guest.name)}
+                          onClick={async () => {
+                            if (window.confirm(`Delete ${guest.name}?`)) {
+                              await deleteDoc(doc(db, "handovers", handoverId, "rsvps", guest.id));
+                            }
+                          }}
                           className="text-red-600 hover:text-red-800 font-bold hover:underline text-xs"
                         >
                           Delete
@@ -1527,23 +1773,32 @@ export default function WeddingRsvpPage() {
         </div>
       </div>
 
-      {/* EDIT GUEST MODAL */}
+      {/* EDIT GUEST MODAL WITH CONSTRAINED DATEPICKER */}
       {editingGuest && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border">
             <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-base font-black text-gray-900">✏️ Edit Contact: {editingGuest.name}</h3>
-              <button onClick={() => setEditingGuest(null)} className="text-gray-400 hover:text-black font-bold text-lg">
-                ✕
-              </button>
+              <h3 className="text-base font-black text-gray-900">✏️ Edit: {editingGuest.name}</h3>
+              <button onClick={() => setEditingGuest(null)} className="text-gray-400 hover:text-black font-bold">✕</button>
             </div>
 
             <form onSubmit={handleSaveEditedGuest} className="space-y-3 text-xs">
               <div>
-                <label className="font-bold text-gray-700 block mb-1">Guest / Family Head Name *</label>
+                <label className="font-bold text-gray-700 block mb-1">Side *</label>
+                <select
+                  value={editSide}
+                  onChange={(e: any) => setEditSide(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold bg-white"
+                >
+                  <option value="Bride">👰 Bride Side</option>
+                  <option value="Groom">🤵 Groom Side</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Guest Name *</label>
                 <input
                   required
-                  placeholder="e.g. Rajesh Sharma"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   className="w-full border p-2 rounded-lg font-bold"
@@ -1551,10 +1806,9 @@ export default function WeddingRsvpPage() {
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 block mb-1">WhatsApp Mobile Number *</label>
+                <label className="font-bold text-gray-700 block mb-1">WhatsApp Number *</label>
                 <input
                   required
-                  placeholder="e.g. 9876543210 or +919876543210"
                   value={editPhone}
                   onChange={(e) => setEditPhone(e.target.value)}
                   className="w-full border p-2 rounded-lg font-mono font-bold"
@@ -1562,38 +1816,80 @@ export default function WeddingRsvpPage() {
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 block mb-1">Guest Headcount (Pax)</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-semibold block mb-0.5">Adults:</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={editAdults}
-                      onChange={(e) => setEditAdults(Number(e.target.value))}
-                      className="w-full border p-2 rounded-lg text-center font-bold"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-semibold block mb-0.5">Minors:</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={editMinors}
-                      onChange={(e) => setEditMinors(Number(e.target.value))}
-                      className="w-full border p-2 rounded-lg text-center font-bold"
-                    />
-                  </div>
+                <label className="font-bold text-gray-700 block mb-1">Stay Resort</label>
+                <input
+                  value={editResort}
+                  onChange={(e) => setEditResort(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold"
+                />
+              </div>
+
+              {/* DATEPICKER WITH CONSTRAINED RANGE */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-bold text-gray-700">Check-in Date (Pick Calendar Date) *</label>
+                  <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                    {toReadableDate(editDateRaw)}
+                  </span>
                 </div>
-                <p className="text-right text-[11px] font-black text-purple-900 mt-1">
-                  Total Pax: {Math.max(0, Number(editAdults)) + Math.max(0, Number(editMinors))}
-                </p>
+                <input
+                  type="date"
+                  required
+                  min={allowedDateRange.min}
+                  max={allowedDateRange.max}
+                  value={editDateRaw}
+                  onChange={(e) => setEditDateRaw(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold bg-white cursor-pointer"
+                />
+                <div className="flex items-center gap-1.5 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditDateRaw(allowedDateRange.day0Iso)}
+                    className="px-2 py-1 bg-gray-100 hover:bg-purple-100 text-gray-700 hover:text-purple-900 rounded font-bold text-[10px] border"
+                  >
+                    Day 0: {allowedDateRange.day0Label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditDateRaw(allowedDateRange.day1Iso)}
+                    className="px-2 py-1 bg-gray-100 hover:bg-purple-100 text-gray-700 hover:text-purple-900 rounded font-bold text-[10px] border"
+                  >
+                    Day 1: {allowedDateRange.day1Label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditDateRaw(allowedDateRange.day2Iso)}
+                    className="px-2 py-1 bg-gray-100 hover:bg-purple-100 text-gray-700 hover:text-purple-900 rounded font-bold text-[10px] border"
+                  >
+                    Day 2: {allowedDateRange.day2Label}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1">Adults</label>
+                  <input
+                    type="number"
+                    value={editAdults}
+                    onChange={(e) => setEditAdults(Number(e.target.value))}
+                    className="w-full border p-2 rounded-lg text-center font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1">Minors</label>
+                  <input
+                    type="number"
+                    value={editMinors}
+                    onChange={(e) => setEditMinors(Number(e.target.value))}
+                    className="w-full border p-2 rounded-lg text-center font-bold"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 block mb-1">Calling / Arrival Notes</label>
+                <label className="font-bold text-gray-700 block mb-1">Notes</label>
                 <input
-                  placeholder="Notes about food, flight arrival, etc."
                   value={editNotes}
                   onChange={(e) => setEditNotes(e.target.value)}
                   className="w-full border p-2 rounded-lg"
@@ -1601,18 +1897,10 @@ export default function WeddingRsvpPage() {
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t">
-                <button
-                  type="button"
-                  onClick={() => setEditingGuest(null)}
-                  className="px-4 py-2 border font-bold text-xs rounded-xl"
-                >
+                <button type="button" onClick={() => setEditingGuest(null)} className="px-4 py-2 border font-bold text-xs rounded-xl">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingEditGuest}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow"
-                >
+                <button type="submit" disabled={savingEditGuest} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow">
                   {savingEditGuest ? "Saving..." : "Save Changes"}
                 </button>
               </div>
@@ -1621,20 +1909,253 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* BULK DELETE RECONFIRMATION MODAL */}
+      {/* MANUAL ADD GUEST MODAL WITH CONSTRAINED DATEPICKER */}
+      {showManualAddModal && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <h3 className="text-base font-black text-gray-900 border-b pb-2">+ Add Guest Manually</h3>
+            <form onSubmit={handleManualAddGuest} className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Wedding Side *</label>
+                <select
+                  value={manualSide}
+                  onChange={(e: any) => setManualSide(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold bg-white"
+                >
+                  <option value="Bride">👰 Bride Side</option>
+                  <option value="Groom">🤵 Groom Side</option>
+                </select>
+              </div>
+
+              <input
+                required
+                placeholder="Family Head / Guest Name *"
+                value={manualName}
+                onChange={(e) => setManualName(e.target.value)}
+                className="w-full border p-2 rounded-lg font-bold"
+              />
+              <input
+                required
+                placeholder="WhatsApp Number (e.g. 9876543210) *"
+                value={manualPhone}
+                onChange={(e) => setManualPhone(e.target.value)}
+                className="w-full border p-2 rounded-lg font-mono font-bold"
+              />
+
+              <div>
+                <label className="font-bold text-gray-600 block mb-0.5">Stay Resort</label>
+                <input
+                  placeholder="e.g. Resort 1"
+                  value={manualResort}
+                  onChange={(e) => setManualResort(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold"
+                />
+              </div>
+
+              {/* DATEPICKER WITH CONSTRAINED RANGE */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-bold text-gray-700">Check-in Date (Pick Calendar Date) *</label>
+                  <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                    {toReadableDate(manualDateRaw)}
+                  </span>
+                </div>
+                <input
+                  type="date"
+                  required
+                  min={allowedDateRange.min}
+                  max={allowedDateRange.max}
+                  value={manualDateRaw}
+                  onChange={(e) => setManualDateRaw(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold bg-white cursor-pointer"
+                />
+                <div className="flex items-center gap-1.5 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setManualDateRaw(allowedDateRange.day0Iso)}
+                    className="px-2 py-1 bg-gray-100 hover:bg-purple-100 text-gray-700 hover:text-purple-900 rounded font-bold text-[10px] border"
+                  >
+                    Day 0: {allowedDateRange.day0Label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualDateRaw(allowedDateRange.day1Iso)}
+                    className="px-2 py-1 bg-gray-100 hover:bg-purple-100 text-gray-700 hover:text-purple-900 rounded font-bold text-[10px] border"
+                  >
+                    Day 1: {allowedDateRange.day1Label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualDateRaw(allowedDateRange.day2Iso)}
+                    className="px-2 py-1 bg-gray-100 hover:bg-purple-100 text-gray-700 hover:text-purple-900 rounded font-bold text-[10px] border"
+                  >
+                    Day 2: {allowedDateRange.day2Label}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-gray-600 block mb-0.5 font-bold">Adults</label>
+                  <input
+                    type="number"
+                    value={manualAdults}
+                    onChange={(e) => setManualAdults(Number(e.target.value))}
+                    className="w-full border p-2 rounded-lg text-center font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-600 block mb-0.5 font-bold">Minors</label>
+                  <input
+                    type="number"
+                    value={manualMinors}
+                    onChange={(e) => setManualMinors(Number(e.target.value))}
+                    className="w-full border p-2 rounded-lg text-center font-bold"
+                  />
+                </div>
+              </div>
+
+              <input
+                placeholder="Arrival / Food Notes..."
+                value={manualNotes}
+                onChange={(e) => setManualNotes(e.target.value)}
+                className="w-full border p-2 rounded-lg"
+              />
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button type="button" onClick={() => setShowManualAddModal(false)} className="px-3 py-1.5 border rounded-lg">
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingManualGuest} className="px-5 py-1.5 bg-purple-700 text-white font-bold rounded-lg shadow">
+                  {savingManualGuest ? "Saving..." : "Save Guest"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM META APPROVED TEMPLATE BUILDER */}
+      {showBulkTemplateModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center border-b pb-2">
+              <div>
+                <h3 className="text-base font-black text-gray-900">Custom Meta Approved Template</h3>
+                <p className="text-xs text-gray-500">Send to {selectedGuestIds.size} selected guests</p>
+              </div>
+              <button onClick={() => setShowBulkTemplateModal(false)} className="text-gray-400 hover:text-black font-bold">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 text-xs pr-1">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Twilio Template Content SID *</label>
+                <input
+                  placeholder="e.g. HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  value={customTemplateSid}
+                  onChange={(e) => setCustomTemplateSid(e.target.value)}
+                  className="w-full border p-2.5 rounded-lg font-mono text-xs font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">
+                  How many variables does this approved template have?
+                </label>
+                <select
+                  value={customVarCount}
+                  onChange={(e) => setCustomVarCount(Number(e.target.value))}
+                  className="w-full border p-2 rounded-lg font-bold bg-white"
+                >
+                  <option value={0}>0 (Plain message with no variables)</option>
+                  <option value={1}>1 Variable ({'{{1}}'})</option>
+                  <option value={2}>2 Variables ({'{{1}}'}, {'{{2}}'})</option>
+                  <option value={3}>3 Variables ({'{{1}}'}, {'{{2}}'}, {'{{3}}'})</option>
+                  <option value={4}>4 Variables ({'{{1}}'} to {'{{4}}'})</option>
+                  <option value={5}>5 Variables ({'{{1}}'} to {'{{5}}'})</option>
+                </select>
+              </div>
+
+              {customVarCount > 0 && (
+                <div className="border p-3 rounded-xl bg-gray-50 space-y-3">
+                  <span className="font-black text-gray-700 uppercase tracking-wide text-[10px] block">
+                    Map Each Variable to Guest Details:
+                  </span>
+                  {Array.from({ length: customVarCount }).map((_, idx) => {
+                    const currentMapping = customVarMappings[idx] || { type: "GuestName", customText: "" };
+                    return (
+                      <div key={idx} className="space-y-1 bg-white p-2 rounded-lg border">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono font-black text-purple-700 w-12 text-xs">
+                            {`{{${idx + 1}}}`}:
+                          </span>
+                          <select
+                            value={currentMapping.type}
+                            onChange={(e) => {
+                              const newMappings = [...customVarMappings];
+                              newMappings[idx] = { ...currentMapping, type: e.target.value };
+                              setCustomVarMappings(newMappings);
+                            }}
+                            className="flex-1 border p-1.5 rounded text-xs font-bold bg-white"
+                          >
+                            <option value="GuestName">Guest Full Name</option>
+                            <option value="ParentsRegards">Family/Parents Names</option>
+                            <option value="ResortName">Stay Resort Name</option>
+                            <option value="CheckInDate">Check-in Date</option>
+                            <option value="WeddingTitle">Wedding Title</option>
+                            <option value="GuestSide">Side (Bride / Groom)</option>
+                            <option value="CustomText">Custom Static Text...</option>
+                          </select>
+                        </div>
+                        {currentMapping.type === "CustomText" && (
+                          <input
+                            placeholder="Type custom text for this variable..."
+                            value={currentMapping.customText}
+                            onChange={(e) => {
+                              const newMappings = [...customVarMappings];
+                              newMappings[idx] = { ...currentMapping, customText: e.target.value };
+                              setCustomVarMappings(newMappings);
+                            }}
+                            className="w-full border p-1 rounded text-xs mt-1"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button type="button" onClick={() => setShowBulkTemplateModal(false)} className="px-4 py-2 border font-bold text-xs rounded-xl">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkSendCustomTemplate}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow"
+              >
+                Send Template to ({selectedGuestIds.size}) Guests ➤
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK DELETE CONFIRMATION DIALOG */}
       {showBulkDeleteModal && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border-2 border-red-500">
             <div className="flex items-center gap-3 text-red-600 border-b pb-2">
               <span className="text-3xl">⚠️</span>
               <div>
-                <h3 className="text-base font-black text-gray-900">Permanently Delete Contacts</h3>
-                <span className="text-xs text-red-600 font-bold">{selectedGuestIds.size} guests selected</span>
+                <h3 className="text-base font-black text-gray-900">Delete {selectedGuestIds.size} Guests</h3>
+                <span className="text-xs text-red-600 font-bold">This cannot be undone</span>
               </div>
             </div>
 
             <p className="text-xs text-gray-700 leading-relaxed">
-              This action is <strong>irreversible</strong>. It will permanently remove all selected guests, their attendee rosters, chat history, and uploaded government ID cards from the database.
+              This will permanently delete the selected guests, their attendee rosters, message histories, and uploaded ID cards.
             </p>
 
             <div className="bg-red-50 border border-red-200 p-3 rounded-xl space-y-1">
@@ -1643,7 +2164,7 @@ export default function WeddingRsvpPage() {
               </label>
               <input
                 type="text"
-                placeholder="Type DELETE to confirm"
+                placeholder="Type DELETE"
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 className="w-full border-2 border-red-300 p-2 rounded-lg font-black text-center text-sm tracking-wider uppercase outline-none focus:border-red-600"
@@ -1675,7 +2196,79 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* ATTENDEE & ID ASSIGNMENT MODAL */}
+      {/* EXCEL IMPORT MODAL */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="text-base font-black text-gray-900">📥 Import Guests (Excel / CSV)</h3>
+              <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-black font-bold">✕</button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Target Wedding Side *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setImportSideChoice("Bride")}
+                    className={`py-2 px-3 rounded-lg border font-black flex items-center justify-center gap-1.5 ${
+                      importSideChoice === "Bride" ? "bg-pink-100 border-pink-500 text-pink-900" : "bg-gray-50 text-gray-600"
+                    }`}
+                  >
+                    👰 Bride Side
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImportSideChoice("Groom")}
+                    className={`py-2 px-3 rounded-lg border font-black flex items-center justify-center gap-1.5 ${
+                      importSideChoice === "Groom" ? "bg-blue-100 border-blue-500 text-blue-900" : "bg-gray-50 text-gray-600"
+                    }`}
+                  >
+                    🤵 Groom Side
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Default Stay Resort:</label>
+                <input
+                  value={importDefaultResort}
+                  onChange={(e) => setImportDefaultResort(e.target.value)}
+                  placeholder="e.g. Resort 1"
+                  className="w-full border p-2 rounded-lg font-bold"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-bold text-gray-700">Default Check-in Date:</label>
+                  <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                    {toReadableDate(importDefaultCheckInRaw)}
+                  </span>
+                </div>
+                <input
+                  type="date"
+                  min={allowedDateRange.min}
+                  max={allowedDateRange.max}
+                  value={importDefaultCheckInRaw}
+                  onChange={(e) => setImportDefaultCheckInRaw(e.target.value)}
+                  className="w-full border p-2 rounded-lg font-bold bg-white cursor-pointer"
+                />
+              </div>
+
+              <div className="pt-2">
+                <label className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5 px-4 rounded-xl text-center block cursor-pointer shadow">
+                  {uploadingExcel ? "Processing Sheet..." : "Select File to Upload (.xlsx, .csv)"}
+                  <input type="file" accept=".xlsx, .xls, .csv" onChange={handleExcelImport} className="hidden" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ATTENDEE & ID ROSTER MODAL */}
       {selectedAttendeeGuest && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-4xl w-full h-[90vh] flex flex-col overflow-hidden shadow-2xl border-2 border-gray-300">
@@ -1686,11 +2279,12 @@ export default function WeddingRsvpPage() {
                 </span>
                 <h2 className="text-xl font-black">
                   {selectedAttendeeGuest.name} ({selectedAttendeeGuest.phone})
+                  <span className="text-xs ml-3 bg-purple-700 px-2.5 py-0.5 rounded-full font-bold">
+                    {selectedAttendeeGuest.side || "Bride"} Side
+                  </span>
                 </h2>
               </div>
-              <button onClick={() => setSelectedAttendeeGuest(null)} className="text-gray-400 hover:text-white text-2xl font-black">
-                ✕
-              </button>
+              <button onClick={() => setSelectedAttendeeGuest(null)} className="text-gray-400 hover:text-white text-2xl font-black">✕</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -1714,10 +2308,7 @@ export default function WeddingRsvpPage() {
                     <option value="Minor">Minor / Child</option>
                     <option value="Senior">Senior Citizen</option>
                   </select>
-                  <button
-                    onClick={handleAddAttendee}
-                    className="bg-purple-700 hover:bg-purple-800 text-white font-black px-4 py-2 rounded-lg text-xs"
-                  >
+                  <button onClick={handleAddAttendee} className="bg-purple-700 hover:bg-purple-800 text-white font-black px-4 py-2 rounded-lg text-xs">
                     Add Attendee
                   </button>
                 </div>
@@ -1725,7 +2316,7 @@ export default function WeddingRsvpPage() {
 
               <div className="space-y-4">
                 <h3 className="font-black text-sm text-gray-800 uppercase tracking-wide">
-                  Assign Received IDs (Images or PDFs) to Each Individual Attendee
+                  Assign Received IDs to Attendees
                 </h3>
 
                 {(selectedAttendeeGuest.attendees || []).map((att: any, idx: number) => (
@@ -1744,10 +2335,6 @@ export default function WeddingRsvpPage() {
                     </div>
 
                     <div>
-                      <span className="text-xs font-bold text-gray-600 block mb-2">
-                        Click on any document or photo below to assign/detach it for <strong>{att.name}</strong>:
-                      </span>
-
                       {selectedAttendeeGuest.idCardUrls && selectedAttendeeGuest.idCardUrls.length > 0 ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                           {selectedAttendeeGuest.idCardUrls.map((url: string, pIdx: number) => {
@@ -1768,7 +2355,7 @@ export default function WeddingRsvpPage() {
                                     : "border-gray-200"
                                 }`}
                               >
-                                <div className="relative group h-36 w-full bg-gray-100 overflow-hidden flex items-center justify-center">
+                                <div className="relative group h-36 w-full bg-gray-100 flex items-center justify-center overflow-hidden">
                                   {isPdf ? (
                                     <div className="flex flex-col items-center justify-center p-2 text-center w-full">
                                       <span className="text-3xl">📄</span>
@@ -1798,11 +2385,8 @@ export default function WeddingRsvpPage() {
                                       <img src={resolvedUrl} alt="ID Thumbnail" className="w-full h-full object-cover" />
                                       <button
                                         type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setActiveLightboxImg(resolvedUrl);
-                                        }}
-                                        className="absolute bottom-2 right-2 bg-black/75 hover:bg-black text-white px-2 py-1 rounded-md text-[10px] font-bold shadow flex items-center gap-1"
+                                        onClick={() => setActiveLightboxImg(resolvedUrl)}
+                                        className="absolute bottom-1 right-1 bg-black/75 hover:bg-black text-white px-2 py-0.5 rounded text-[9px] font-bold shadow"
                                       >
                                         🔍 Enlarge
                                       </button>
@@ -1842,9 +2426,7 @@ export default function WeddingRsvpPage() {
                           })}
                         </div>
                       ) : (
-                        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800 italic">
-                          No ID photos or PDF documents have been received from this guest on WhatsApp yet.
-                        </div>
+                        <p className="text-xs text-gray-500 italic">No IDs received from this guest on WhatsApp yet.</p>
                       )}
                     </div>
                   </div>
@@ -1861,7 +2443,7 @@ export default function WeddingRsvpPage() {
                 disabled={savingAttendees}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow"
               >
-                {savingAttendees ? "Saving Changes..." : "Save Attendee Roster & IDs"}
+                {savingAttendees ? "Saving..." : "Save Attendee Roster"}
               </button>
             </div>
           </div>
@@ -1883,16 +2465,11 @@ export default function WeddingRsvpPage() {
                   Drag on the page to crop an ID card. You can crop multiple IDs from the same page (e.g. Front & Back, or multiple people).
                 </p>
               </div>
-              <button
-                onClick={() => setCroppingPdfUrl(null)}
-                className="text-white hover:text-red-400 font-bold text-xl px-2"
-              >
-                ✕
-              </button>
+              <button onClick={() => setCroppingPdfUrl(null)} className="text-white hover:text-red-400 font-bold text-xl px-2">✕</button>
             </div>
 
             <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-100">
-              {/* LEFT: CANVAS VIEWER */}
+              {/* LEFT: CANVAS VIEWER WITH PERFECT SELECTION BOX */}
               <div className="flex-1 flex flex-col items-center justify-between p-4 overflow-hidden">
                 <div className="flex items-center justify-between w-full max-w-2xl bg-white p-2 rounded-xl border shadow-sm mb-2 text-xs">
                   <div className="flex items-center gap-2">
@@ -1924,8 +2501,8 @@ export default function WeddingRsvpPage() {
                     </button>
                     <button
                       onClick={handleAddCropToTray}
-                      disabled={cropPdfLoading}
-                      className="bg-purple-700 hover:bg-purple-800 text-white font-black px-3.5 py-1.5 rounded-lg shadow flex items-center gap-1.5 animate-pulse"
+                      disabled={cropPdfLoading || !cropRect}
+                      className="bg-purple-700 hover:bg-purple-800 text-white font-black px-3.5 py-1.5 rounded-lg shadow flex items-center gap-1.5 animate-pulse disabled:opacity-50"
                     >
                       ➕ Crop This Selection
                     </button>
@@ -1943,8 +2520,7 @@ export default function WeddingRsvpPage() {
                     <canvas
                       ref={cropCanvasRef}
                       onMouseDown={handleCanvasMouseDown}
-                      onMouseMove={handleCanvasMouseMove}
-                      onMouseUp={handleCanvasMouseUp}
+                      onTouchStart={handleCanvasTouchStart}
                       className="max-h-[62vh] max-w-full w-auto object-contain cursor-crosshair rounded bg-white block"
                     />
 
@@ -2024,7 +2600,6 @@ export default function WeddingRsvpPage() {
                   )}
                 </div>
 
-                {/* Footer Save Button */}
                 <div className="p-4 border-t bg-gray-50">
                   <button
                     onClick={handleInitiateSaveCrops}
@@ -2067,7 +2642,6 @@ export default function WeddingRsvpPage() {
               Click on any previous crop below that you want to <strong>replace/overwrite</strong> with your new crop(s). Unselected cards will be kept safe.
             </p>
 
-            {/* List of previously cropped images from this PDF */}
             <div className="flex-1 overflow-y-auto p-2 border rounded-xl bg-gray-50 space-y-2">
               <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide block mb-1">
                 Previously Cropped Cards from this PDF:
@@ -2093,7 +2667,6 @@ export default function WeddingRsvpPage() {
                           alt="Previous Crop"
                           className="w-full h-full object-contain"
                         />
-                        {/* ENLARGE PREVIEW BUTTON */}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -2123,7 +2696,6 @@ export default function WeddingRsvpPage() {
               </div>
             </div>
 
-            {/* Bottom Decision Options */}
             <div className="space-y-2 pt-2 border-t">
               <div className="flex flex-col sm:flex-row justify-end gap-2">
                 <button
@@ -2135,7 +2707,6 @@ export default function WeddingRsvpPage() {
                   Back to Cropper
                 </button>
 
-                {/* Option 1: Append without replacing anything */}
                 <button
                   type="button"
                   onClick={() => handleExecuteSaveCrops([])}
@@ -2145,7 +2716,6 @@ export default function WeddingRsvpPage() {
                   Keep All & Add as New ({croppedTray.length})
                 </button>
 
-                {/* Option 2: Replace only selected old crops */}
                 <button
                   type="button"
                   onClick={() => handleExecuteSaveCrops(Array.from(selectedOldCropsToReplace))}
@@ -2164,7 +2734,7 @@ export default function WeddingRsvpPage() {
       {isChatModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 md:p-4 no-print">
           <div className="bg-white w-full h-full md:rounded-2xl shadow-2xl flex overflow-hidden border border-gray-300">
-            {/* LEFT SIDEBAR: ALL GUEST CHATS */}
+            {/* LEFT SIDEBAR: SORTED BY MOST RECENT INTERACTION AT TOP */}
             <div className={`w-full md:w-80 lg:w-96 border-r flex flex-col bg-white ${activeChatGuest ? "hidden md:flex" : "flex"}`}>
               <div className="bg-[#075E54] text-white px-4 py-3 flex justify-between items-center">
                 <div className="flex items-center gap-2">
@@ -2207,7 +2777,12 @@ export default function WeddingRsvpPage() {
                           {guest.name.charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <h4 className="text-xs font-black text-gray-900 truncate">{guest.name}</h4>
+                          <h4 className="text-xs font-black text-gray-900 truncate flex items-center gap-1.5">
+                            {guest.name}
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-gray-100 text-gray-700">
+                              {guest.side || "Bride"}
+                            </span>
+                          </h4>
                           <p className="text-[11px] text-gray-500 font-mono truncate">{guest.phone}</p>
                           <p className="text-[11px] text-gray-600 truncate mt-0.5">
                             {guest.lastMessage || "No messages yet"}
@@ -2217,7 +2792,7 @@ export default function WeddingRsvpPage() {
 
                       <div className="text-right flex-shrink-0 ml-2">
                         {guest.hasUnreadMessages && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 block ml-auto mb-1"></span>
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 block ml-auto mb-1 animate-pulse"></span>
                         )}
                         <span className="text-[9px] text-gray-400 block font-mono">
                           {guest.lastMessageAt
@@ -2246,11 +2821,11 @@ export default function WeddingRsvpPage() {
                       <h3 className="font-black text-sm flex items-center gap-2">
                         {activeChatGuest.name}
                         <span className="text-[10px] bg-emerald-700 px-2 py-0.5 rounded text-emerald-100 font-normal">
-                          WhatsApp
+                          {activeChatGuest.side || "Bride"} Side
                         </span>
                       </h3>
                       <p className="text-[11px] text-emerald-100 font-mono">
-                        {activeChatGuest.phone} • {activeChatGuest.totalPax || 2} Pax • {activeChatGuest.status}
+                        {activeChatGuest.phone} • {activeChatGuest.stayResort || handover.resortName} (Check-in: {activeChatGuest.checkInDate || allowedDateRange.day1Label})
                       </p>
                     </div>
                   </div>
@@ -2259,7 +2834,7 @@ export default function WeddingRsvpPage() {
                       onClick={() => handleOpenAttendeeModal(activeChatGuest)}
                       className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-lg text-xs font-bold"
                     >
-                      👤 Attendee & ID Roster ({activeChatGuest.idCardUrls?.length || 0})
+                      👤 Attendees & IDs ({activeChatGuest.idCardUrls?.length || 0})
                     </button>
                   </div>
                 </div>
@@ -2290,11 +2865,10 @@ export default function WeddingRsvpPage() {
                             </p>
                           )}
 
-                          {/* Media / Audio / PDF Attachments */}
                           {msg.mediaUrls && msg.mediaUrls.length > 0 && (
                             <div className="space-y-2 pt-1">
                               {msg.mediaUrls.map((url: string, idx: number) => {
-                                const isAudio = url.includes(".mp4") || url.includes(".m4a") || url.includes("audio");
+                                const isAudio = url.includes(".mp4") || url.includes(".webm") || url.includes("audio");
                                 const isPdf = isPdfFile(url, msg.body);
                                 const isVideo = url.includes("video");
                                 const resolvedUrl = getMediaDisplayUrl(url);
@@ -2399,8 +2973,18 @@ export default function WeddingRsvpPage() {
                   <input
                     type="file"
                     ref={fileInputRef}
-                    onChange={handleSelectFile}
-                    accept="image/*,video/*,application/pdf,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setPendingFile(file);
+                      if (file.type.startsWith("image/")) {
+                        const r = new FileReader();
+                        r.onload = (ev) => setPendingFilePreview(ev.target?.result as string);
+                        r.readAsDataURL(file);
+                      } else {
+                        setPendingFilePreview(null);
+                      }
+                    }}
                     className="hidden"
                   />
 
@@ -2479,7 +3063,7 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* CONFIRMATION & PREVIEW MODAL FOR ATTACHMENT */}
+      {/* CONFIRM ATTACHMENT MODAL */}
       {pendingFile && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl border">
@@ -2511,7 +3095,10 @@ export default function WeddingRsvpPage() {
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button
                 type="button"
-                onClick={handleCancelAttachment}
+                onClick={() => {
+                  setPendingFile(null);
+                  setPendingFilePreview(null);
+                }}
                 disabled={uploadingAttachment}
                 className="px-4 py-2 border font-bold text-xs rounded-xl"
               >
@@ -2519,7 +3106,33 @@ export default function WeddingRsvpPage() {
               </button>
               <button
                 type="button"
-                onClick={handleConfirmSendAttachment}
+                onClick={async () => {
+                  if (!pendingFile || !activeChatGuest) return;
+                  setUploadingAttachment(true);
+                  try {
+                    const fileRef = ref(storage, `chat_media/${handoverId}/${activeChatGuest.id}/${Date.now()}_${pendingFile.name}`);
+                    await uploadBytes(fileRef, pendingFile, { contentType: pendingFile.type });
+                    const downloadUrl = await getDownloadURL(fileRef);
+
+                    await fetch("/api/twilio/chat", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        handoverId,
+                        guestId: activeChatGuest.id,
+                        phone: activeChatGuest.phone,
+                        message: pendingFileCaption.trim(),
+                        mediaUrl: downloadUrl,
+                        fileName: pendingFile.name,
+                      }),
+                    });
+                    setPendingFile(null);
+                    setPendingFilePreview(null);
+                    scrollToLatestMessage(true);
+                  } finally {
+                    setUploadingAttachment(false);
+                  }
+                }}
                 disabled={uploadingAttachment}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow"
               >
@@ -2530,149 +3143,7 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* MODAL: BULK CUSTOM APPROVED TEMPLATE */}
-      {showBulkTemplateModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border">
-            <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-base font-black text-gray-900">Send Approved Template in Bulk</h3>
-              <button onClick={() => setShowBulkTemplateModal(false)} className="text-gray-400 hover:text-black font-bold">
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-600">
-              Sending to <strong>{selectedGuestIds.size} selected guests</strong>. Enter your Twilio Content/Template SID:
-            </p>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-gray-700 block mb-1">Approved Template SID:</label>
-                <input
-                  placeholder="e.g. HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                  value={customTemplateSid}
-                  onChange={(e) => setCustomTemplateSid(e.target.value)}
-                  className="w-full border p-2.5 rounded-lg font-mono text-xs"
-                />
-              </div>
-
-              <div className="border p-3 rounded-lg bg-gray-50 space-y-2">
-                <span className="font-black text-[11px] text-gray-700 block">Template Variables Mapping:</span>
-                <div>
-                  <label className="text-[10px] text-gray-500 font-bold">Variable {'{{1}}'}:</label>
-                  <select
-                    value={customTemplateVar1}
-                    onChange={(e) => setCustomTemplateVar1(e.target.value)}
-                    className="w-full border p-1.5 rounded bg-white"
-                  >
-                    <option value="GuestName">Guest Full Name</option>
-                    <option value="ResortName">Resort / Venue Name</option>
-                    <option value="WeddingTitle">Wedding Title</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 font-bold">Variable {'{{2}}'}:</label>
-                  <select
-                    value={customTemplateVar2}
-                    onChange={(e) => setCustomTemplateVar2(e.target.value)}
-                    className="w-full border p-1.5 rounded bg-white"
-                  >
-                    <option value="ResortName">Resort / Venue Name</option>
-                    <option value="GuestName">Guest Full Name</option>
-                    <option value="WeddingTitle">Wedding Title</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 font-bold">Variable {'{{3}}'}:</label>
-                  <select
-                    value={customTemplateVar3}
-                    onChange={(e) => setCustomTemplateVar3(e.target.value)}
-                    className="w-full border p-1.5 rounded bg-white"
-                  >
-                    <option value="WeddingTitle">Wedding Title</option>
-                    <option value="ResortName">Resort / Venue Name</option>
-                    <option value="GuestName">Guest Full Name</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <button
-                type="button"
-                onClick={() => setShowBulkTemplateModal(false)}
-                className="px-4 py-2 border font-bold text-xs rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleBulkSendCustomTemplate}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow"
-              >
-                Start Bulk Sending ➤
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Manual Add Guest Modal */}
-      {showManualAddModal && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
-            <h3 className="text-lg font-black text-gray-900 border-b pb-2">Add Guest</h3>
-            <form onSubmit={handleManualAddGuest} className="space-y-3 text-xs">
-              <input
-                required
-                placeholder="Family Head Name *"
-                value={manualName}
-                onChange={(e) => setManualName(e.target.value)}
-                className="w-full border p-2 rounded-lg font-bold"
-              />
-              <input
-                required
-                placeholder="WhatsApp Number (e.g. 9876543210) *"
-                value={manualPhone}
-                onChange={(e) => setManualPhone(e.target.value)}
-                className="w-full border p-2 rounded-lg font-bold font-mono"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="number"
-                  placeholder="Adults"
-                  value={manualAdults}
-                  onChange={(e) => setManualAdults(Number(e.target.value))}
-                  className="w-full border p-2 rounded-lg text-center"
-                />
-                <input
-                  type="number"
-                  placeholder="Minors"
-                  value={manualMinors}
-                  onChange={(e) => setManualMinors(Number(e.target.value))}
-                  className="w-full border p-2 rounded-lg text-center"
-                />
-              </div>
-              <input
-                placeholder="Arrival notes..."
-                value={manualNotes}
-                onChange={(e) => setManualNotes(e.target.value)}
-                className="w-full border p-2 rounded-lg"
-              />
-              <div className="flex justify-end gap-2 pt-2 border-t">
-                <button type="button" onClick={() => setShowManualAddModal(false)} className="px-3 py-1.5 border rounded-lg">
-                  Cancel
-                </button>
-                <button type="submit" disabled={savingManualGuest} className="px-4 py-1.5 bg-purple-700 text-white font-bold rounded-lg">
-                  {savingManualGuest ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Lightbox Modal (Images) - Highest Z-Index so it appears over all modals */}
+      {/* LIGHTBOX FOR IMAGES */}
       {activeLightboxImg && (
         <div
           onClick={() => setActiveLightboxImg(null)}
@@ -2692,7 +3163,7 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* Lightbox Modal (PDF Viewer) */}
+      {/* LIGHTBOX FOR PDF */}
       {activeLightboxDoc && (
         <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 no-print">
           <div className="bg-white w-full max-w-4xl h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl">
@@ -2724,7 +3195,6 @@ export default function WeddingRsvpPage() {
         </div>
       )}
 
-      {/* PRINT-OPTIMIZED CSS */}
       <style jsx global>{`
         @media print {
           body {

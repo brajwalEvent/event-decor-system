@@ -4,8 +4,8 @@ import { db, storage } from "../../lib/firebase";
 import { 
   collection, 
   addDoc, 
-  getDocs, 
-  getDoc, 
+  getDocs,
+  getDoc,
   setDoc, 
   query, 
   orderBy, 
@@ -24,51 +24,26 @@ export default function ComponentsPage() {
   const [componentsList, setComponentsList] = useState<any[]>([]);
   const [warehouseElements, setWarehouseElements] = useState<any[]>([]);
   const [naturalFlowersLibrary, setNaturalFlowersLibrary] = useState<any[]>([]);
-
-  // 🌟 2 NEW MASTER LIBRARIES
-  const [freshConsumablesLibrary, setFreshConsumablesLibrary] = useState<any[]>([]);
-  const [vendorRentalsLibrary, setVendorRentalsLibrary] = useState<any[]>([]);
-
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-
-  // View Component Modal & Lightbox
+  // VIEW COMPONENT MODAL STATE
   const [viewComponentData, setViewComponentData] = useState<any | null>(null);
-  const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
 
-  // 3-Way Filter States
+  // 3-WAY FILTER STATES
   const [filterCategory, setFilterCategory] = useState("All");
   const [filterTheme, setFilterTheme] = useState("All");
   const [filterEvent, setFilterEvent] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Element Picker Modal
+  // ELEMENT PICKER POPUP (FOR PROPS)
   const [showElementPickerModal, setShowElementPickerModal] = useState(false);
   const [elementPickerCategory, setElementPickerCategory] = useState("All");
   const [elementPickerSearch, setElementPickerSearch] = useState("");
   const [currentSelectedElement, setCurrentSelectedElement] = useState<any | null>(null);
   const [currentElemQty, setCurrentElemQty] = useState(1);
   const [currentElemNotes, setCurrentElemNotes] = useState("");
-
-  // Quick Add to Library Modals
-  const [showAddConsumableModal, setShowAddConsumableModal] = useState(false);
-  const [newConsumableName, setNewConsumableName] = useState("");
-  const [newConsumableUnit, setNewConsumableUnit] = useState("Per Meter");
-  const [newConsumableCustomUnit, setNewConsumableCustomUnit] = useState("");
-  const [newConsumablePrice, setNewConsumablePrice] = useState<number | "">("");
-  const [newConsumableRemarks, setNewConsumableRemarks] = useState("");
-
-  const [showAddRentalModal, setShowAddRentalModal] = useState(false);
-  const [newRentalVendor, setNewRentalVendor] = useState("");
-  const [newRentalItemName, setNewRentalItemName] = useState("");
-  const [newRentalSize, setNewRentalSize] = useState("");
-  const [newRentalRate, setNewRentalRate] = useState<number | "">("");
-  const [newRentalUnit, setNewRentalUnit] = useState("Per Pc");
-  const [newRentalCustomUnit, setNewRentalCustomUnit] = useState("");
-  const [newRentalIsDayApplicable, setNewRentalIsDayApplicable] = useState(false);
-  const [newRentalRemarks, setNewRentalRemarks] = useState("");
 
   // Categories
   const [categories, setCategories] = useState<string[]>([
@@ -83,7 +58,7 @@ export default function ComponentsPage() {
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [customCategoryInput, setCustomCategoryInput] = useState("");
 
-  // Component Form Fields
+  // Form Fields
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [category, setCategory] = useState("Stages");
@@ -112,29 +87,47 @@ export default function ComponentsPage() {
   const [currentFlowerQty, setCurrentFlowerQty] = useState<number>(1);
   const [currentFlowerNotes, setCurrentFlowerNotes] = useState("");
 
-  // 3. 🌟 General Fresh Consumables (Dropdown Driven)
-  const [freshPurchases, setFreshPurchases] = useState<any[]>([]);
-  const [currentConsumableId, setCurrentConsumableId] = useState("");
-  const [currentConsumableQty, setCurrentConsumableQty] = useState<number>(1);
-  const [currentConsumableNotes, setCurrentConsumableNotes] = useState("");
+  // 3. General Fresh Consumables (Non-flower items)
+  const [freshPurchases, setFreshPurchases] = useState<
+    { item: string; qtyDescription: string; estimatedCost: number }[]
+  >([]);
+  const [freshItemName, setFreshItemName] = useState("");
+  const [freshItemQty, setFreshItemQty] = useState("");
+  const [freshItemCost, setFreshItemCost] = useState<number>(0);
 
-  // 4. 🌟 Vendor Rentals (Dropdown Driven with Multi-Day Support)
-  const [vendorRentals, setVendorRentals] = useState<any[]>([]);
-  const [currentRentalCatalogId, setCurrentRentalCatalogId] = useState("");
-  const [currentRentalQty, setCurrentRentalQty] = useState<number>(1);
-  const [currentRentalDays, setCurrentRentalDays] = useState<number>(1);
-  const [currentRentalIsDayApplicable, setCurrentRentalIsDayApplicable] = useState(false);
-  const [currentRentalSize, setCurrentRentalSize] = useState("");
-  const [currentRentalNotes, setCurrentRentalNotes] = useState("");
+  // 4. Vendor Rentals
+  const [vendorRentals, setVendorRentals] = useState<
+    { item: string; quantity: number; size: string; vendorDetails: string; estimatedCost: number }[]
+  >([]);
+  const [rentalItemName, setRentalItemName] = useState("");
+  const [rentalQty, setRentalQty] = useState<number>(1);
+  const [rentalSize, setRentalSize] = useState("");
+  const [rentalVendorDetails, setRentalVendorDetails] = useState("");
+  const [rentalCost, setRentalCost] = useState<number>(0);
 
   // 5. Instructions & Assembly Steps
   const [writtenInstructions, setWrittenInstructions] = useState("");
   const [steps, setSteps] = useState<string[]>([]);
   const [stepInput, setStepInput] = useState("");
 
-  // 6. Media
+  // 6. Variations
+  const [variations, setVariations] = useState<
+    { name: string; description: string; costAdjustment: number }[]
+  >([]);
+  const [variationName, setVariationName] = useState("");
+  const [variationDesc, setVariationDesc] = useState("");
+  const [variationCost, setVariationCost] = useState<number>(0);
+
+  // 7. Media
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [existingImages, setExistingImages] = useState<string[]>([]);
+  // NEW: State for Full-Screen Image Lightbox
+  const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
+
+  // NEW: Helper to remove an existing image
+  const handleRemoveExistingImage = (idxToRemove: number) => {
+    setExistingImages((prev) => prev.filter((_, idx) => idx !== idxToRemove));
+  };
   const [audioFile, setAudioFile] = useState<File | Blob | null>(null);
   const [existingAudioUrl, setExistingAudioUrl] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -152,34 +145,31 @@ export default function ComponentsPage() {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
-  // Load All 4 Libraries + Components Data
   const fetchData = async () => {
     try {
-      const [compSnap, elemSnap, flSnap, fcSnap, vrSnap] = await Promise.all([
-        getDocs(query(collection(db, "components"), orderBy("createdAt", "desc"))),
-        getDocs(query(collection(db, "elements"), orderBy("name", "asc"))),
-        getDocs(query(collection(db, "natural_flowers"), orderBy("name", "asc"))).catch(() => ({ docs: [] })),
-        getDocs(query(collection(db, "fresh_consumables_library"), orderBy("name", "asc"))).catch(() => ({ docs: [] })),
-        getDocs(query(collection(db, "vendor_rentals_library"), orderBy("itemName", "asc"))).catch(() => ({ docs: [] })),
-      ]);
-
+      const compQ = query(collection(db, "components"), orderBy("createdAt", "desc"));
+      const compSnap = await getDocs(compQ);
       setComponentsList(compSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setWarehouseElements(elemSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setNaturalFlowersLibrary(flSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setFreshConsumablesLibrary(fcSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setVendorRentalsLibrary(vrSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    } catch (err) {
-      console.error("Error loading component data:", err);
-    }
 
-    try {
-      const catDoc = await getDoc(doc(db, "metadata", "component_categories"));
-      if (catDoc.exists() && catDoc.data().list) {
-        setCategories(Array.from(new Set([...categories, ...catDoc.data().list])));
-      }
-    } catch (e) {
-      console.error("Error loading categories:", e);
+      const elemQ = query(collection(db, "elements"), orderBy("name", "asc"));
+      const elemSnap = await getDocs(elemQ);
+      setWarehouseElements(elemSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      const flSnap = await getDocs(query(collection(db, "natural_flowers"), orderBy("name", "asc")));
+      setNaturalFlowersLibrary(flSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error("Error loading data:", err);
     }
+    // Load saved custom component categories
+      try {
+        const catDoc = await getDoc(doc(db, "metadata", "component_categories"));
+        if (catDoc.exists() && catDoc.data().list) {
+          const savedList = catDoc.data().list;
+          setCategories(Array.from(new Set([...categories, ...savedList])));
+        }
+      } catch (e) {
+        console.error("Error loading custom categories:", e);
+      }
   };
 
   useEffect(() => {
@@ -208,9 +198,11 @@ export default function ComponentsPage() {
     setCustomEventInput("");
   };
 
-  // 1. Add Warehouse Prop
   const handleAddWarehouseElement = () => {
-    if (!currentSelectedElement) return alert("Please select a prop first.");
+    if (!currentSelectedElement) {
+      alert("Please select a prop first.");
+      return;
+    }
 
     const addedQty = Number(currentElemQty) || 1;
     const existingIndex = selectedWarehouseElements.findIndex(
@@ -246,9 +238,11 @@ export default function ComponentsPage() {
     setCurrentElemNotes("");
   };
 
-  // 2. Add Natural Flower
   const handleAddNaturalFlower = () => {
-    if (!currentFlowerId) return alert("Please select a flower.");
+    if (!currentFlowerId) {
+      alert("Please select a natural flower from the list.");
+      return;
+    }
 
     const flowerObj = naturalFlowersLibrary.find((f) => f.id === currentFlowerId);
     if (!flowerObj) return;
@@ -284,179 +278,82 @@ export default function ComponentsPage() {
     setCurrentFlowerNotes("");
   };
 
-  // 3. 🌟 Add Fresh Consumable from Library
-  const handleAddFreshConsumable = () => {
-    if (!currentConsumableId) return alert("Please select a consumable item.");
-
-    const itemObj = freshConsumablesLibrary.find((c) => c.id === currentConsumableId);
-    if (!itemObj) return;
-
-    const qty = Number(currentConsumableQty) || 1;
-    const unitStr = itemObj.unit === "Custom Unit" ? itemObj.customUnit : itemObj.unit;
-    const unitPrice = Number(itemObj.approxPrice) || 0;
-    const totalCost = unitPrice * qty;
-
-    const existingIdx = freshPurchases.findIndex((fp) => fp.catalogId === currentConsumableId);
-
-    if (existingIdx > -1) {
-      const updated = [...freshPurchases];
-      updated[existingIdx].quantity += qty;
-      updated[existingIdx].estimatedCost += totalCost;
-      updated[existingIdx].qtyDescription = `${updated[existingIdx].quantity} ${unitStr}`;
-      if (currentConsumableNotes.trim()) {
-        updated[existingIdx].notes = updated[existingIdx].notes
-          ? `${updated[existingIdx].notes}; ${currentConsumableNotes.trim()}`
-          : currentConsumableNotes.trim();
-      }
-      setFreshPurchases(updated);
-    } else {
-      setFreshPurchases([
-        ...freshPurchases,
-        {
-          catalogId: itemObj.id,
-          item: itemObj.name,
-          quantity: qty,
-          unit: unitStr,
-          unitPrice,
-          estimatedCost: totalCost,
-          qtyDescription: `${qty} ${unitStr}`,
-          notes: currentConsumableNotes.trim(),
-        },
-      ]);
-    }
-
-    setCurrentConsumableId("");
-    setCurrentConsumableQty(1);
-    setCurrentConsumableNotes("");
+  const handleAddFreshItem = () => {
+    if (!freshItemName.trim()) return;
+    setFreshPurchases([
+      ...freshPurchases,
+      { item: freshItemName.trim(), qtyDescription: freshItemQty.trim(), estimatedCost: Number(freshItemCost) || 0 },
+    ]);
+    setFreshItemName("");
+    setFreshItemQty("");
+    setFreshItemCost(0);
   };
 
-  // 4. 🌟 Add Vendor Rental from Library
-  const handleAddVendorRental = () => {
-    if (!currentRentalCatalogId) return alert("Please select a rental item from the list.");
-
-    const rentalObj = vendorRentalsLibrary.find((r) => r.id === currentRentalCatalogId);
-    if (!rentalObj) return;
-
-    const qty = Number(currentRentalQty) || 1;
-    const isDay = Boolean(currentRentalIsDayApplicable);
-    const days = isDay ? Math.max(1, Number(currentRentalDays) || 1) : 1;
-    const rate = Number(rentalObj.rate) || 0;
-    const totalCost = rate * qty * days;
-    const unitStr = rentalObj.pricingUnit === "Custom Unit" ? rentalObj.customUnit : rentalObj.pricingUnit;
-
-    const existingIdx = vendorRentals.findIndex((vr) => vr.catalogId === currentRentalCatalogId);
-
-    if (existingIdx > -1) {
-      const updated = [...vendorRentals];
-      updated[existingIdx].quantity += qty;
-      updated[existingIdx].estimatedCost += totalCost;
-      if (currentRentalNotes.trim()) {
-        updated[existingIdx].notes = updated[existingIdx].notes
-          ? `${updated[existingIdx].notes}; ${currentRentalNotes.trim()}`
-          : currentRentalNotes.trim();
-      }
-      setVendorRentals(updated);
-    } else {
-      setVendorRentals([
-        ...vendorRentals,
-        {
-          catalogId: rentalObj.id,
-          item: rentalObj.itemName,
-          vendorName: rentalObj.vendorName,
-          vendorDetails: rentalObj.vendorName, // Backward compatible
-          size: currentRentalSize.trim() || rentalObj.size || "",
-          quantity: qty,
-          unit: unitStr,
-          rate,
-          isDayApplicable: isDay,
-          days: isDay ? days : null,
-          estimatedCost: totalCost,
-          notes: currentRentalNotes.trim(),
-        },
-      ]);
-    }
-
-    setCurrentRentalCatalogId("");
-    setCurrentRentalQty(1);
-    setCurrentRentalDays(1);
-    setCurrentRentalIsDayApplicable(false);
-    setCurrentRentalSize("");
-    setCurrentRentalNotes("");
-  };
-
-  // 🌟 Quick Save Consumable to Master Catalog
-  const handleQuickCreateConsumable = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newConsumableName.trim() || !newConsumablePrice) return;
-
-    try {
-      const newDoc = {
-        name: newConsumableName.trim(),
-        unit: newConsumableUnit,
-        customUnit: newConsumableUnit === "Custom Unit" ? newConsumableCustomUnit.trim() : "",
-        approxPrice: Number(newConsumablePrice),
-        remarks: newConsumableRemarks.trim(),
-        createdAt: new Date().toISOString(),
-      };
-
-      const docRef = await addDoc(collection(db, "fresh_consumables_library"), newDoc);
-      const createdItem = { id: docRef.id, ...newDoc };
-
-      setFreshConsumablesLibrary((prev) => [...prev, createdItem].sort((a, b) => a.name.localeCompare(b.name)));
-      setCurrentConsumableId(docRef.id);
-      setShowAddConsumableModal(false);
-
-      setNewConsumableName("");
-      setNewConsumablePrice("");
-      setNewConsumableRemarks("");
-      setNewConsumableCustomUnit("");
-    } catch (err: any) {
-      alert("Failed to save consumable: " + err.message);
-    }
-  };
-
-  // 🌟 Quick Save Rental to Master Catalog
-  const handleQuickCreateRental = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newRentalVendor.trim() || !newRentalItemName.trim() || !newRentalRate) return;
-
-    try {
-      const newDoc = {
-        vendorName: newRentalVendor.trim(),
-        itemName: newRentalItemName.trim(),
-        size: newRentalSize.trim(),
-        rate: Number(newRentalRate),
-        pricingUnit: newRentalUnit,
-        customUnit: newRentalUnit === "Custom Unit" ? newRentalCustomUnit.trim() : "",
-        isDayApplicable: newRentalIsDayApplicable,
-        remarks: newRentalRemarks.trim(),
-        createdAt: new Date().toISOString(),
-      };
-
-      const docRef = await addDoc(collection(db, "vendor_rentals_library"), newDoc);
-      const createdItem = { id: docRef.id, ...newDoc };
-
-      setVendorRentalsLibrary((prev) => [...prev, createdItem].sort((a, b) => a.itemName.localeCompare(b.itemName)));
-      setCurrentRentalCatalogId(docRef.id);
-      setCurrentRentalIsDayApplicable(newRentalIsDayApplicable);
-      setShowAddRentalModal(false);
-
-      setNewRentalVendor("");
-      setNewRentalItemName("");
-      setNewRentalSize("");
-      setNewRentalRate("");
-      setNewRentalCustomUnit("");
-      setNewRentalRemarks("");
-      setNewRentalIsDayApplicable(false);
-    } catch (err: any) {
-      alert("Failed to save rental item: " + err.message);
-    }
+  const handleAddRental = () => {
+    if (!rentalItemName.trim()) return;
+    setVendorRentals([
+      ...vendorRentals,
+      { item: rentalItemName.trim(), quantity: Number(rentalQty) || 1, size: rentalSize.trim(), vendorDetails: rentalVendorDetails.trim(), estimatedCost: Number(rentalCost) || 0 },
+    ]);
+    setRentalItemName("");
+    setRentalQty(1);
+    setRentalSize("");
+    setRentalVendorDetails("");
+    setRentalCost(0);
   };
 
   const handleAddStep = () => {
     if (!stepInput.trim()) return;
     setSteps([...steps, stepInput.trim()]);
     setStepInput("");
+  };
+
+  const handleAddVariation = () => {
+    if (!variationName.trim()) return;
+    setVariations([
+      ...variations,
+      { name: variationName.trim(), description: variationDesc.trim(), costAdjustment: Number(variationCost) || 0 },
+    ]);
+    setVariationName("");
+    setVariationDesc("");
+    setVariationCost(0);
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        setAudioFile(audioBlob);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+
+      (window as any).recordingInterval = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      alert("Microphone permission denied.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      clearInterval((window as any).recordingInterval);
+    }
   };
 
   const resetForm = () => {
@@ -479,18 +376,15 @@ export default function ComponentsPage() {
     setCurrentFlowerNotes("");
     setCurrentSelectedElement(null);
     setFreshPurchases([]);
-    setCurrentConsumableId("");
-    setCurrentConsumableQty(1);
-    setCurrentConsumableNotes("");
     setVendorRentals([]);
-    setCurrentRentalCatalogId("");
-    setCurrentRentalQty(1);
-    setCurrentRentalDays(1);
-    setCurrentRentalIsDayApplicable(false);
-    setCurrentRentalSize("");
-    setCurrentRentalNotes("");
+    setRentalItemName("");
+    setRentalQty(1);
+    setRentalSize("");
+    setRentalVendorDetails("");
+    setRentalCost(0);
     setWrittenInstructions("");
     setSteps([]);
+    setVariations([]);
     setImageFiles([]);
     setExistingImages([]);
     setAudioFile(null);
@@ -513,13 +407,32 @@ export default function ComponentsPage() {
     setUnit(item.dimensions?.unit || "ft");
     setSelectedEvents(item.events || []);
 
-    setSelectedWarehouseElements(item.warehouseElements || []);
+    const deduplicatedElements: any[] = [];
+    (item.warehouseElements || []).forEach((el: any) => {
+      const idx = deduplicatedElements.findIndex((d) => d.elementId === el.elementId);
+      if (idx > -1) {
+        deduplicatedElements[idx].quantity = Number(deduplicatedElements[idx].quantity) + Number(el.quantity);
+      } else {
+        deduplicatedElements.push({ ...el });
+      }
+    });
+    setSelectedWarehouseElements(deduplicatedElements);
+
     setSelectedFlowers(item.naturalFlowers || []);
     setFreshPurchases(item.freshPurchases || []);
-    setVendorRentals(item.vendorRentals || []);
+
+    const mappedRentals = (item.vendorRentals || []).map((r: any) => ({
+      item: r.item || "",
+      quantity: r.quantity || 1,
+      size: r.size || "",
+      vendorDetails: r.vendorDetails || r.details || "",
+      estimatedCost: r.estimatedCost || 0,
+    }));
+    setVendorRentals(mappedRentals);
 
     setWrittenInstructions(item.writtenInstructions || "");
     setSteps(item.steps || []);
+    setVariations(item.variations || []);
     setExistingImages(item.images || []);
     setImageFiles([]);
     setExistingAudioUrl(item.audioUrl || "");
@@ -528,7 +441,7 @@ export default function ComponentsPage() {
   };
 
   const handleDelete = async (id: string, compName: string) => {
-    if (!window.confirm(`Delete "${compName}"?`)) return;
+    if (!window.confirm(`Are you sure you want to delete "${compName}"?`)) return;
     try {
       await deleteDoc(doc(db, "components", id));
       setComponentsList((prev) => prev.filter((c) => c.id !== id));
@@ -542,11 +455,15 @@ export default function ComponentsPage() {
     setSubmitting(true);
 
     try {
+      // PERMANENT CATEGORY SAVING
       const finalCategory = isCustomCategory ? customCategoryInput.trim() : category;
       if (isCustomCategory && finalCategory && !categories.includes(finalCategory)) {
         const updatedCats = [...categories, finalCategory];
         setCategories(updatedCats);
         await setDoc(doc(db, "metadata", "component_categories"), { list: updatedCats }, { merge: true }).catch(() => {});
+      }
+      if (isCustomCategory && finalCategory && !categories.includes(finalCategory)) {
+        setCategories((prev) => [...prev, finalCategory]);
       }
 
       let uploadedImageUrls: string[] = [...existingImages];
@@ -555,6 +472,13 @@ export default function ComponentsPage() {
         await uploadBytes(fileRef, file);
         const url = await getDownloadURL(fileRef);
         uploadedImageUrls.push(url);
+      }
+
+      let finalAudioUrl = existingAudioUrl;
+      if (audioFile) {
+        const audioRef = ref(storage, `components/audio/${Date.now()}_instructions.webm`);
+        await uploadBytes(audioRef, audioFile);
+        finalAudioUrl = await getDownloadURL(audioRef);
       }
 
       const componentData = {
@@ -576,8 +500,9 @@ export default function ComponentsPage() {
         vendorRentals,
         writtenInstructions,
         steps,
+        variations,
         images: uploadedImageUrls,
-        audioUrl: existingAudioUrl,
+        audioUrl: finalAudioUrl,
         updatedAt: new Date().toISOString(),
       };
 
@@ -620,28 +545,32 @@ export default function ComponentsPage() {
     return matchesCat && matchesSearch;
   });
 
-  const currentFlowerObj = naturalFlowersLibrary.find((f) => f.id === currentFlowerId);
-  const currentConsumableObj = freshConsumablesLibrary.find((c) => c.id === currentConsumableId);
-  const currentRentalObj = vendorRentalsLibrary.find((r) => r.id === currentRentalCatalogId);
+  const alreadyAddedQtyInCurrentComp = currentSelectedElement
+    ? selectedWarehouseElements
+        .filter((item) => item.elementId === currentSelectedElement.id)
+        .reduce((sum, item) => sum + Number(item.quantity), 0)
+    : 0;
 
-  const totalFloralCost = selectedFlowers.reduce((sum, f) => sum + (Number(f.approxPrice) * Number(f.quantity)), 0);
-  const totalFreshCost = freshPurchases.reduce((sum, fp) => sum + Number(fp.estimatedCost || 0), 0);
-  const totalRentalCost = vendorRentals.reduce((sum, vr) => sum + Number(vr.estimatedCost || 0), 0);
+  const totalProjectedQty = alreadyAddedQtyInCurrentComp + Number(currentElemQty || 0);
+  const liveStockForSelected = currentSelectedElement ? getElementWarehouseStock(currentSelectedElement.id) : 0;
+  const isSelectedProjectedShort = currentSelectedElement ? totalProjectedQty > liveStockForSelected : false;
+
+  const currentFlowerObj = naturalFlowersLibrary.find((f) => f.id === currentFlowerId);
+  const totalComponentFlowerEstimatedCost = selectedFlowers.reduce((sum, f) => sum + (Number(f.approxPrice) * Number(f.quantity)), 0);
 
   const allAvailableEventTags = Array.from(new Set([...standardEventTypes, ...selectedEvents]));
 
-  if (loading) return <div className="p-8 text-center text-xl font-bold font-mono">Loading components...</div>;
+  if (loading) return <div className="p-8 text-center text-xl font-bold">Loading components...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 p-4 sm:p-6 font-sans">
+    <div className="min-h-screen bg-gray-50 text-gray-900 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border-2 border-gray-300 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border-2 border-gray-300 shadow-sm">
           <div>
             <h1 className="text-3xl font-black text-gray-900">Components Master Library</h1>
             <p className="text-sm font-semibold text-gray-600 mt-1">
-              Structured architecture with master libraries for Props, Natural Flowers, Consumables & Vendor Rentals.
+              Organized by Category, Custom Themes, and Real-Time Warehouse Stock Validation.
             </p>
           </div>
           {role !== "sales" && (
@@ -659,9 +588,9 @@ export default function ComponentsPage() {
         </div>
 
         {/* 3-WAY FILTER BAR */}
-        <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3 font-mono text-xs">
+        <div className="bg-white p-4 rounded-xl border-2 border-gray-300 shadow-sm space-y-3">
           <div className="flex items-center justify-between border-b pb-2">
-            <span className="font-black uppercase text-gray-700">
+            <span className="text-xs font-black uppercase text-gray-700 flex items-center gap-1.5">
               🔍 Multi-Filter Engine ({filteredComponents.length} items found)
             </span>
             {(filterCategory !== "All" || filterTheme !== "All" || filterEvent !== "All" || searchQuery) && (
@@ -672,7 +601,7 @@ export default function ComponentsPage() {
                   setFilterEvent("All");
                   setSearchQuery("");
                 }}
-                className="font-bold text-red-600 hover:underline"
+                className="text-xs font-bold text-red-600 hover:underline"
               >
                 Reset All Filters
               </button>
@@ -681,11 +610,11 @@ export default function ComponentsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
-              <label className="block font-black text-gray-700 mb-1">1. Category:</label>
+              <label className="block text-[11px] font-black text-gray-700 mb-1">1. Category:</label>
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-gray-900"
+                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white text-gray-900"
               >
                 {distinctCategories.map((c) => (
                   <option key={c} value={c}>{c === "All" ? "✨ All Categories" : c}</option>
@@ -694,11 +623,11 @@ export default function ComponentsPage() {
             </div>
 
             <div>
-              <label className="block font-black text-gray-700 mb-1">2. Theme:</label>
+              <label className="block text-[11px] font-black text-gray-700 mb-1">2. Theme:</label>
               <select
                 value={filterTheme}
                 onChange={(e) => setFilterTheme(e.target.value)}
-                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-purple-900"
+                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white text-purple-900"
               >
                 {distinctThemes.map((t) => (
                   <option key={t} value={t}>{t === "All" ? "🎨 All Themes" : t}</option>
@@ -707,11 +636,11 @@ export default function ComponentsPage() {
             </div>
 
             <div>
-              <label className="block font-black text-gray-700 mb-1">3. Event:</label>
+              <label className="block text-[11px] font-black text-gray-700 mb-1">3. Event:</label>
               <select
                 value={filterEvent}
                 onChange={(e) => setFilterEvent(e.target.value)}
-                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-blue-900"
+                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white text-blue-900"
               >
                 {distinctEvents.map((ev) => (
                   <option key={ev} value={ev}>{ev === "All" ? "🗓️ All Events" : ev}</option>
@@ -720,12 +649,12 @@ export default function ComponentsPage() {
             </div>
 
             <div>
-              <label className="block font-black text-gray-700 mb-1">Search Keywords:</label>
+              <label className="block text-[11px] font-black text-gray-700 mb-1">Search Keywords:</label>
               <input
                 placeholder="Search name or code..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-gray-900"
+                className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white text-gray-900"
               />
             </div>
           </div>
@@ -733,89 +662,133 @@ export default function ComponentsPage() {
 
         {/* Components Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredComponents.map((comp) => (
-            <div
-              key={comp.id}
-              className="bg-white border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between hover:shadow-md transition"
-            >
-              <div>
-                <div className="h-56 bg-gray-200 relative overflow-hidden">
-                  {comp.images && comp.images.length > 0 ? (
-                    <img src={comp.images[0]} alt={comp.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500 font-bold">
-                      No Component Photos
-                    </div>
-                  )}
+          {filteredComponents.map((comp) => {
+            const compPropUsage: { [elemId: string]: number } = {};
+            comp.warehouseElements?.forEach((item: any) => {
+              compPropUsage[item.elementId] = (compPropUsage[item.elementId] || 0) + Number(item.quantity);
+            });
 
-                  <span className="absolute top-2 left-2 bg-gray-900 text-white text-xs font-mono font-black px-2.5 py-1 rounded shadow">
-                    {comp.code || "COMP"}
-                  </span>
+            const hasStockShortage = Object.keys(compPropUsage).some((elemId) => {
+              const liveStock = getElementWarehouseStock(elemId);
+              return compPropUsage[elemId] > liveStock;
+            });
 
-                  <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded shadow">
-                    ₹{comp.baseCost?.toLocaleString() || "0"}
-                  </span>
+            return (
+              <div
+                key={comp.id}
+                className={`bg-white border-2 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between hover:shadow-md transition ${
+                  hasStockShortage ? "border-red-400" : "border-gray-300"
+                }`}
+              >
+                <div>
+                  <div className="h-56 bg-gray-200 relative overflow-hidden">
+                    {comp.images && comp.images.length > 0 ? (
+                      <img src={comp.images[0]} alt={comp.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-500 font-bold">
+                        No Component Photos
+                      </div>
+                    )}
 
-                  {comp.theme && (
-                    <span className="absolute bottom-2 left-2 bg-purple-900/90 text-white text-[11px] font-black px-2.5 py-1 rounded-md shadow">
-                      🎨 {comp.theme}
+                    <span className="absolute top-2 left-2 bg-gray-900 text-white text-xs font-mono font-black px-2.5 py-1 rounded shadow">
+                      {comp.code || "COMP"}
                     </span>
-                  )}
-                </div>
 
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="bg-slate-100 text-slate-800 text-xs font-black px-2.5 py-1 rounded border border-slate-300 uppercase">
-                      {comp.category}
+                    <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded shadow">
+                      ₹{comp.baseCost?.toLocaleString() || "0"}
                     </span>
-                    {comp.dimensions?.length > 0 && (
-                      <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                        📐 {comp.dimensions.length}×{comp.dimensions.width}×{comp.dimensions.height} {comp.dimensions.unit}
+
+                    {comp.theme && (
+                      <span className="absolute bottom-2 left-2 bg-purple-900/90 text-white text-[11px] font-black px-2.5 py-1 rounded-md shadow backdrop-blur-sm">
+                        🎨 {comp.theme}
+                      </span>
+                    )}
+
+                    {hasStockShortage && (
+                      <span className="absolute bottom-2 right-2 bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded shadow-lg animate-pulse">
+                        🚨 Shortage Alert!
                       </span>
                     )}
                   </div>
 
-                  <h3 className="font-black text-xl text-gray-900 leading-snug">{comp.name}</h3>
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-slate-100 text-slate-800 text-xs font-black px-2.5 py-1 rounded border border-slate-300 uppercase">
+                        {comp.category}
+                      </span>
+                      {comp.dimensions?.length > 0 && (
+                        <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                          📐 {comp.dimensions.length}×{comp.dimensions.width}×{comp.dimensions.height} {comp.dimensions.unit}
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-lg text-xs font-semibold text-gray-700 space-y-1.5 font-mono">
-                    <p>📦 <strong>Props:</strong> {comp.warehouseElements?.length || 0} attached</p>
-                    <p>🌸 <strong>Flowers:</strong> {comp.naturalFlowers?.length || 0} types</p>
-                    <p>✨ <strong>Consumables:</strong> {comp.freshPurchases?.length || 0} items</p>
-                    <p>🚚 <strong>Rentals:</strong> {comp.vendorRentals?.length || 0} items</p>
+                    <h3 className="font-black text-xl text-gray-900 leading-snug">{comp.name}</h3>
+
+                    {comp.events && comp.events.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {comp.events.map((evName: string, evIdx: number) => (
+                          <span
+                            key={evIdx}
+                            className="bg-purple-100 text-purple-900 font-bold px-2 py-0.5 rounded text-[11px] border border-purple-200"
+                          >
+                            🗓️ {evName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-lg text-xs font-semibold text-gray-700 space-y-1.5">
+                      <p>📦 <strong>Warehouse Props:</strong> {comp.warehouseElements?.length || 0} items attached</p>
+
+                      {comp.naturalFlowers && comp.naturalFlowers.length > 0 ? (
+                        <div className="bg-pink-50/70 border border-pink-200 p-1.5 rounded text-pink-950 text-[11px]">
+                          <span className="font-black uppercase block text-[10px]">🌸 Natural Flowers ({comp.naturalFlowers.length}):</span>
+                          <p className="truncate">
+                            {comp.naturalFlowers.map((f: any) => `${f.quantity} ${f.unit} ${f.flowerName}`).join(", ")}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-gray-400 italic">🌸 No natural flowers specified</p>
+                      )}
+
+                      <p>🌸 <strong>Fresh Consumables:</strong> {comp.freshPurchases?.length || 0} items</p>
+                      <p>🚚 <strong>Vendor Rentals:</strong> {comp.vendorRentals?.length || 0} items</p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {role !== "sales" && (
-                <div className="p-4 border-t border-gray-200 grid grid-cols-3 gap-2 bg-gray-50 text-xs font-bold">
-                  <button
+                {role !== "sales" && (
+                  <div className="p-4 border-t border-gray-200 grid grid-cols-2 gap-2 bg-gray-50">
+                    <button
                     onClick={() => setViewComponentData(comp)}
-                    className="bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 py-2 rounded transition"
+                    className="w-full bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 font-bold py-2 rounded text-xs transition"
                   >
-                    View
+                    🔍 View Component Details
                   </button>
-                  <button
-                    onClick={() => openEditModal(comp)}
-                    className="bg-white border-2 border-gray-300 hover:bg-gray-100 text-gray-900 py-2 rounded transition"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(comp.id, comp.name)}
-                    className="bg-red-50 border-2 border-red-300 hover:bg-red-100 text-red-700 py-2 rounded transition"
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+                    <button
+                      onClick={() => openEditModal(comp)}
+                      className="w-full bg-white border-2 border-gray-300 hover:bg-gray-100 text-gray-900 font-bold py-2 rounded text-sm transition"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(comp.id, comp.name)}
+                      className="w-full bg-red-50 border-2 border-red-300 hover:bg-red-100 text-red-700 font-bold py-2 rounded text-sm transition"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* MODAL: CREATE OR EDIT COMPONENT */}
         {showModal && (
           <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-40">
-            <div className="bg-white rounded-2xl max-w-4xl w-full p-6 max-h-[92vh] overflow-y-auto border-2 border-gray-400 shadow-2xl space-y-6">
+            <div className="bg-white rounded-xl max-w-3xl w-full p-6 max-h-[92vh] overflow-y-auto border-2 border-gray-400 shadow-2xl space-y-6">
               <div className="flex justify-between items-center border-b-2 pb-3">
                 <h2 className="text-2xl font-black text-gray-900">
                   {isEditing ? "Edit Component" : "Create New Component"}
@@ -828,7 +801,7 @@ export default function ComponentsPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSave} className="space-y-6 text-xs">
+              <form onSubmit={handleSave} className="space-y-6">
                 {/* 1. General Info */}
                 <div className="space-y-4">
                   <h3 className="font-black text-blue-700 text-sm tracking-wide uppercase border-b pb-1">
@@ -836,19 +809,19 @@ export default function ComponentsPage() {
                   </h3>
 
                   <div>
-                    <label className="block text-xs font-black text-gray-800 mb-1">Component Name *</label>
+                    <label className="block text-sm font-black text-gray-800 mb-1">Component Name *</label>
                     <input
                       required
                       placeholder="e.g. Royal Mughal Sangeet Stage 24x16"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900 outline-none"
+                      className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900 outline-none focus:border-blue-600"
                     />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-black text-gray-800 mb-1">Category</label>
+                      <label className="block text-sm font-black text-gray-800 mb-1">Category</label>
                       <select
                         value={isCustomCategory ? "custom" : category}
                         onChange={(e) => {
@@ -871,11 +844,11 @@ export default function ComponentsPage() {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="text-xs font-black text-gray-800">Code (Auto)</label>
+                        <label className="text-sm font-black text-gray-800">Code (Auto)</label>
                         <button
                           type="button"
                           onClick={() => setCode(generateComponentCode(isCustomCategory ? customCategoryInput : category))}
-                          className="text-[10px] text-blue-700 font-bold hover:underline"
+                          className="text-xs text-blue-700 font-bold hover:underline"
                         >
                           🔄 Re-generate
                         </button>
@@ -889,38 +862,121 @@ export default function ComponentsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-black text-gray-800 mb-1">Estimated Selling/Base Price (₹)</label>
+                      <label className="block text-sm font-black text-gray-800 mb-1">Estimated Cost (₹)</label>
                       <input
                         type="number"
                         placeholder="85000"
-                        value={baseCost || ""}
+                        value={baseCost}
                         onChange={(e) => setBaseCost(Number(e.target.value))}
                         className="w-full border-2 border-gray-400 p-2.5 rounded-lg font-bold text-gray-900"
                       />
                     </div>
                   </div>
 
-                  {/* Theme */}
-                  <div className="bg-purple-50 p-3.5 rounded-xl border-2 border-purple-200">
-                    <label className="block text-xs font-black text-purple-950 uppercase mb-1">
-                      🎨 Assign Custom Theme *
+                  {/* CUSTOM CATEGORY INPUT */}
+                  {isCustomCategory && (
+                    <div className="bg-blue-50 p-3 rounded-xl border-2 border-blue-300">
+                      <label className="block text-xs font-black text-blue-950 mb-1">
+                        Enter New Custom Category Name *
+                      </label>
+                      <input
+                        required
+                        placeholder="e.g. Photo Booths, Dining Canopies, Mandaps"
+                        value={customCategoryInput}
+                        onChange={(e) => {
+                          setCustomCategoryInput(e.target.value);
+                          if (!isEditing) setCode(generateComponentCode(e.target.value));
+                        }}
+                        className="w-full border-2 border-blue-400 p-2 rounded-lg font-bold text-xs bg-white text-gray-900 outline-none"
+                      />
+                    </div>
+                  )}
+
+                  {/* THEME */}
+                  <div className="bg-purple-50 p-3.5 rounded-xl border-2 border-purple-200 space-y-1.5">
+                    <label className="block text-xs font-black text-purple-950 uppercase">
+                      🎨 Assign Custom Theme (Single Theme Only) *
                     </label>
                     <input
                       placeholder="Type custom theme name (e.g. Lavender Theme, Pastel Chic)..."
                       value={theme}
                       onChange={(e) => setTheme(e.target.value)}
-                      className="w-full border-2 border-purple-400 p-2 rounded-lg font-bold text-gray-900 outline-none"
+                      list="existing-themes-list"
+                      className="w-full border-2 border-purple-400 p-2 rounded-lg font-bold text-sm bg-white text-gray-900 outline-none"
                     />
+                    <datalist id="existing-themes-list">
+                      {distinctThemes.filter((t) => t !== "All").map((t) => (
+                        <option key={t} value={t} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  {/* EVENTS */}
+                  <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border-2 border-slate-300">
+                    <label className="block text-xs font-black text-gray-800 uppercase">
+                      🗓️ Assign Events (Select Multiple) *
+                    </label>
+                    <p className="text-[11px] text-gray-600 font-medium">Click to select all events where this component can be deployed:</p>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {allAvailableEventTags.map((ev) => {
+                        const isSelected = selectedEvents.includes(ev);
+                        const isCustom = !standardEventTypes.includes(ev);
+
+                        return (
+                          <button
+                            key={ev}
+                            type="button"
+                            onClick={() => toggleEvent(ev)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 ${
+                              isSelected
+                                ? "bg-purple-700 text-white border-purple-800 shadow"
+                                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                            }`}
+                          >
+                            <span>{isSelected ? "✓ " : "+ "} {ev}</span>
+                            {isCustom && (
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedEvents(selectedEvents.filter((item) => item !== ev));
+                                }}
+                                className="text-red-200 hover:text-white font-black ml-1 text-xs"
+                                title="Delete custom event"
+                              >
+                                ✕
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex gap-2 pt-2 border-t border-gray-200">
+                      <input
+                        placeholder="Add other custom event (e.g. Sufi Night, Carnival)..."
+                        value={customEventInput}
+                        onChange={(e) => setCustomEventInput(e.target.value)}
+                        className="flex-1 border-2 border-gray-400 p-2 rounded-lg text-xs font-bold bg-white text-gray-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomEvent}
+                        className="bg-gray-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg text-xs"
+                      >
+                        + Add Custom Event
+                      </button>
+                    </div>
                   </div>
 
                   {/* Dimensions */}
                   <div>
-                    <label className="block text-xs font-black text-gray-800 mb-1">Overall Dimensions (L × W × H)</label>
+                    <label className="block text-sm font-black text-gray-800 mb-1">Overall Dimensions (L × W × H)</label>
                     <div className="grid grid-cols-4 gap-2">
-                      <input placeholder="L" type="number" value={length} onChange={(e) => setLength(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg font-bold text-center" />
-                      <input placeholder="W" type="number" value={width} onChange={(e) => setWidth(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg font-bold text-center" />
-                      <input placeholder="H" type="number" value={height} onChange={(e) => setHeight(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg font-bold text-center" />
-                      <select value={unit} onChange={(e) => setUnit(e.target.value)} className="border-2 border-gray-400 p-2 rounded-lg font-bold">
+                      <input placeholder="L" type="number" value={length} onChange={(e) => setLength(e.target.value)} className="border-2 border-gray-400 p-2.5 rounded-lg font-bold text-center" />
+                      <input placeholder="W" type="number" value={width} onChange={(e) => setWidth(e.target.value)} className="border-2 border-gray-400 p-2.5 rounded-lg font-bold text-center" />
+                      <input placeholder="H" type="number" value={height} onChange={(e) => setHeight(e.target.value)} className="border-2 border-gray-400 p-2.5 rounded-lg font-bold text-center" />
+                      <select value={unit} onChange={(e) => setUnit(e.target.value)} className="border-2 border-gray-400 p-2.5 rounded-lg font-bold">
                         <option value="ft">ft</option>
                         <option value="inch">inch</option>
                         <option value="m">m</option>
@@ -929,47 +985,224 @@ export default function ComponentsPage() {
                   </div>
                 </div>
 
-                {/* 2. Warehouse Props */}
-                <div className="space-y-3 bg-amber-50/60 p-4 rounded-xl border-2 border-amber-300">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-black text-amber-950 text-xs tracking-wide uppercase">
-                      2. Warehouse Props / Elements
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setShowElementPickerModal(true)}
-                      className="bg-amber-800 hover:bg-amber-900 text-white font-black px-3.5 py-1.5 rounded-lg text-xs shadow"
-                    >
-                      🖼️ Browse & Pick Props
-                    </button>
-                  </div>
-
-                  {selectedWarehouseElements.length > 0 && (
-                    <div className="space-y-2 mt-2">
-                      {selectedWarehouseElements.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2.5 rounded-lg border bg-white shadow-sm font-mono">
-                          <span className="font-bold text-gray-900">{item.quantity}x {item.elementName}</span>
+                {/* 2. Photos */}
+                <div className="space-y-3 bg-slate-50 p-4 rounded-xl border-2 border-slate-300">
+                  <label className="block text-sm font-black text-gray-900">
+                    📸 Component Reference Photos
+                  </label>
+                  
+                  {/* Show Existing Images with Remove Button */}
+                  {existingImages.length > 0 && (
+                    <div className="flex flex-wrap gap-3 mb-2">
+                      {existingImages.map((imgUrl, idx) => (
+                        <div key={idx} className="relative w-24 h-24 border-2 border-gray-300 rounded-lg overflow-hidden group shadow-sm">
+                          <img src={imgUrl} alt="Saved" className="w-full h-full object-cover" />
                           <button
                             type="button"
-                            onClick={() => setSelectedWarehouseElements(selectedWarehouseElements.filter((_, i) => i !== idx))}
-                            className="text-red-600 font-bold hover:underline"
+                            onClick={() => handleRemoveExistingImage(idx)}
+                            className="absolute top-1 right-1 bg-red-600 text-white rounded-md w-6 h-6 flex items-center justify-center text-xs font-black shadow opacity-0 group-hover:opacity-100 transition"
+                            title="Remove Image"
                           >
-                            Remove
+                            ✕
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
+
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={(e) => {
+                      if (e.target.files) setImageFiles(Array.from(e.target.files));
+                    }}
+                    className="block w-full text-sm border-2 border-dashed border-gray-400 rounded-lg p-2 bg-white cursor-pointer"
+                  />
+                  {imageFiles.length > 0 && (
+                    <p className="text-xs text-blue-700 font-bold mt-1">
+                      + {imageFiles.length} new file(s) selected to upload.
+                    </p>
+                  )}
                 </div>
 
-                {/* 3. Natural Flowers Requirement */}
+                {/* 3. ASSIGN WAREHOUSE PROPS */}
+                <div className="space-y-3 bg-amber-50/60 p-4 rounded-xl border-2 border-amber-300">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="font-black text-amber-950 text-sm tracking-wide uppercase">
+                        2. Assign Warehouse Elements (Visual Prop Picker)
+                      </h3>
+                      <p className="text-xs text-amber-800">
+                        Adding an element twice automatically combines quantity and prevents duplicate entries.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setElementPickerCategory("All");
+                        setElementPickerSearch("");
+                        setShowElementPickerModal(true);
+                      }}
+                      className="bg-amber-800 hover:bg-amber-900 text-white font-black px-4 py-2 rounded-lg text-xs shadow flex items-center gap-1.5"
+                    >
+                      🖼️ Browse & Pick Warehouse Props
+                    </button>
+                  </div>
+
+                  {currentSelectedElement ? (
+                    <div className="bg-white border-2 border-amber-400 p-3.5 rounded-xl space-y-3 shadow-sm">
+                      <div className="flex flex-col md:flex-row items-center gap-4">
+                        <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden border flex-shrink-0">
+                          {currentSelectedElement.images?.[0] || currentSelectedElement.imageUrl ? (
+                            <img
+                              src={currentSelectedElement.images?.[0] || currentSelectedElement.imageUrl}
+                              alt={currentSelectedElement.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="text-[10px] text-gray-400 text-center pt-5">No Pic</div>
+                          )}
+                        </div>
+
+                        <div className="flex-1">
+                          <span className="text-[10px] font-black uppercase bg-amber-100 text-amber-900 px-2 py-0.5 rounded">
+                            {currentSelectedElement.category}
+                          </span>
+                          <h4 className="font-bold text-gray-900 text-sm">{currentSelectedElement.name}</h4>
+                          <p className="text-xs text-gray-500 font-mono">
+                            SKU: {currentSelectedElement.sku} | Warehouse Inventory: <strong>{liveStockForSelected} units</strong>
+                            {alreadyAddedQtyInCurrentComp > 0 && (
+                              <span className="ml-2 text-blue-700 font-bold">
+                                (Already added: {alreadyAddedQtyInCurrentComp} units)
+                              </span>
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="w-24">
+                          <label className="block text-[11px] font-black text-gray-700">Quantity to Add *</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={currentElemQty}
+                            onChange={(e) => setCurrentElemQty(Number(e.target.value))}
+                            className="w-full border-2 border-gray-400 p-1.5 rounded text-center font-bold text-xs"
+                          />
+                        </div>
+
+                        <div className="flex-1">
+                          <label className="block text-[11px] font-black text-gray-700">Placement Notes</label>
+                          <input
+                            placeholder="e.g. 2 on stage left, 2 on stage right"
+                            value={currentElemNotes}
+                            onChange={(e) => setCurrentElemNotes(e.target.value)}
+                            className="w-full border-2 border-gray-400 p-1.5 rounded font-medium text-xs"
+                          />
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={handleAddWarehouseElement}
+                            className="bg-green-700 hover:bg-green-800 text-white font-black px-4 py-2 rounded text-xs shadow"
+                          >
+                            {alreadyAddedQtyInCurrentComp > 0 ? "Update Quantity" : "+ Add Prop"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCurrentSelectedElement(null)}
+                            className="text-red-600 font-bold text-xs hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+
+                      {isSelectedProjectedShort && (
+                        <div className="bg-red-50 border-2 border-red-500 p-2.5 rounded-lg flex items-center gap-2 animate-pulse shadow-sm">
+                          <span className="text-base">🚨</span>
+                          <p className="text-xs font-black text-red-700">
+                            INSUFFICIENT WAREHOUSE STOCK: Adding {currentElemQty} will bring total needed to {totalProjectedQty} units, but warehouse only has {liveStockForSelected} units for SKU {currentSelectedElement.sku}!
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 bg-white/70 border border-dashed border-amber-300 rounded-lg">
+                      <p className="text-xs font-bold text-amber-900">
+                        No prop selected. Click the button above to visually choose props from your inventory.
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedWarehouseElements.length > 0 && (
+                    <div className="space-y-2 mt-3">
+                      <p className="text-xs font-black text-gray-800 uppercase">Attached Props to this Component:</p>
+                      {selectedWarehouseElements.map((item, idx) => {
+                        const liveStock = getElementWarehouseStock(item.elementId);
+                        const isShort = Number(item.quantity) > liveStock;
+
+                        return (
+                          <div
+                            key={idx}
+                            className={`flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-lg border-2 text-xs shadow-sm gap-2 ${
+                              isShort ? "bg-red-50/80 border-red-400" : "bg-white border-gray-200"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-gray-100 rounded overflow-hidden border flex-shrink-0">
+                                {item.imageUrl ? (
+                                  <img src={item.imageUrl} alt={item.elementName} className="w-full h-full object-cover" />
+                                ) : (
+                                  <span className="text-[9px] text-gray-400 flex items-center justify-center h-full">No Pic</span>
+                                )}
+                              </div>
+                              <div>
+                                <span className="font-bold text-gray-900 text-sm">
+                                  {item.quantity}x {item.elementName}
+                                </span>
+                                {item.notes && <span className="text-gray-500 italic ml-2">({item.notes})</span>}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 self-end sm:self-auto">
+                              {isShort && (
+                                <span className="bg-red-600 text-white font-black text-[11px] px-2.5 py-1 rounded shadow animate-pulse">
+                                  🚨 Shortage: Needs {item.quantity}, Only {liveStock} in warehouse!
+                                </span>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => setSelectedWarehouseElements(selectedWarehouseElements.filter((_, i) => i !== idx))}
+                                className="text-red-600 font-bold hover:underline"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. NATURAL FLOWERS REQUIREMENT */}
                 <div className="space-y-3 bg-pink-50/60 p-4 rounded-xl border-2 border-pink-300">
                   <div className="flex justify-between items-center">
-                    <h3 className="font-black text-pink-950 text-xs tracking-wide uppercase">
-                      3. Natural Flowers Requirement
-                    </h3>
-                    <span className="text-xs font-bold text-pink-900 bg-white px-2.5 py-1 rounded border border-pink-300 font-mono">
-                      Floral Subtotal: ₹{totalFloralCost.toLocaleString()}
+                    <div>
+                      <h3 className="font-black text-pink-950 text-sm tracking-wide uppercase">
+                        3. Natural Flowers Requirement (From Floral Library)
+                      </h3>
+                      <p className="text-xs text-pink-800">
+                        Pick from your standard flowers to calculate wedding-wide procurement sheets later.
+                      </p>
+                    </div>
+
+                    <span className="text-xs font-bold text-pink-900 bg-white px-2.5 py-1 rounded border border-pink-300">
+                      Est. Floral Cost: ₹{totalComponentFlowerEstimatedCost.toLocaleString()}
                     </span>
                   </div>
 
@@ -979,7 +1212,7 @@ export default function ComponentsPage() {
                       <select
                         value={currentFlowerId}
                         onChange={(e) => setCurrentFlowerId(e.target.value)}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-gray-900"
+                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white text-gray-900"
                       >
                         <option value="">-- Choose Natural Flower --</option>
                         {naturalFlowersLibrary.map((f) => (
@@ -999,17 +1232,17 @@ export default function ComponentsPage() {
                         min="1"
                         value={currentFlowerQty}
                         onChange={(e) => setCurrentFlowerQty(Number(e.target.value))}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-center bg-white"
+                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-xs bg-white text-center text-gray-900"
                       />
                     </div>
 
                     <div className="md:col-span-3">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Placement Notes</label>
+                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Usage / Placement Notes</label>
                       <input
-                        placeholder="e.g. Backdrop border"
+                        placeholder="e.g. Backdrop border, hanging strings"
                         value={currentFlowerNotes}
                         onChange={(e) => setCurrentFlowerNotes(e.target.value)}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-medium bg-white"
+                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-medium text-xs bg-white text-gray-900"
                       />
                     </div>
 
@@ -1017,21 +1250,22 @@ export default function ComponentsPage() {
                       <button
                         type="button"
                         onClick={handleAddNaturalFlower}
-                        className="w-full bg-pink-700 hover:bg-pink-800 text-white font-black py-2 rounded-lg shadow"
+                        className="w-full bg-pink-700 hover:bg-pink-800 text-white font-black py-2 rounded-lg text-xs shadow"
                       >
                         + Add Flower
                       </button>
                     </div>
                   </div>
 
-                  {selectedFlowers.length > 0 && (
-                    <div className="space-y-1.5 mt-2 font-mono">
+                  {selectedFlowers.length > 0 ? (
+                    <div className="space-y-1.5 mt-2">
                       {selectedFlowers.map((f, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-pink-200 shadow-sm">
+                        <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-pink-200 text-xs shadow-sm">
                           <div>
-                            <span className="font-bold text-pink-950">
+                            <span className="font-bold text-pink-950 text-sm">
                               🌸 {f.quantity} {f.unit} of {f.flowerName}
                             </span>
+                            {f.notes && <span className="text-gray-500 italic ml-2">({f.notes})</span>}
                             <span className="ml-2 font-bold text-gray-500">
                               (₹{f.approxPrice} × {f.quantity} = ₹{(f.approxPrice * f.quantity).toLocaleString()})
                             </span>
@@ -1046,297 +1280,58 @@ export default function ComponentsPage() {
                         </div>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-xs text-pink-900 italic">No natural flowers attached to this component yet.</p>
                   )}
                 </div>
 
-                {/* 4. 🌟 GENERAL CONSUMABLES REQUIREMENT (DROPDOWN + AUTO COST) */}
-                <div className="space-y-3 bg-green-50/60 p-4 rounded-xl border-2 border-green-300">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="font-black text-green-950 text-xs tracking-wide uppercase">
-                        4. General Fresh Consumables (Flex, Thermocol, Foam, Candles)
-                      </h3>
-                      <p className="text-[11px] text-green-800">
-                        Select from your master consumables library. Cost automatically aggregates into budget.
-                      </p>
+                {/* 5. General Fresh Buys & Rentals */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-green-50/50 p-4 rounded-xl border-2 border-green-300 space-y-2">
+                    <h3 className="font-black text-green-900 text-xs uppercase">General Consumables (Flex, Candles, Thermocol)</h3>
+                    <div className="grid grid-cols-12 gap-1.5">
+                      <input placeholder="Item" value={freshItemName} onChange={(e) => setFreshItemName(e.target.value)} className="col-span-6 border p-1.5 rounded text-xs bg-white" />
+                      <input placeholder="Qty" value={freshItemQty} onChange={(e) => setFreshItemQty(e.target.value)} className="col-span-3 border p-1.5 rounded text-xs bg-white" />
+                      <input type="number" placeholder="Cost" value={freshItemCost || ""} onChange={(e) => setFreshItemCost(Number(e.target.value))} className="col-span-3 border p-1.5 rounded text-xs bg-white" />
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-green-900 bg-white px-2.5 py-1 rounded border border-green-300 font-mono">
-                        Consumables Total: ₹{totalFreshCost.toLocaleString()}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAddConsumableModal(true)}
-                        className="bg-green-800 hover:bg-green-900 text-white font-black px-2.5 py-1 rounded text-[11px] shadow"
-                      >
-                        + New in Library
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white p-3 rounded-xl border border-green-200">
-                    <div className="md:col-span-5">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Select Consumable *</label>
-                      <select
-                        value={currentConsumableId}
-                        onChange={(e) => setCurrentConsumableId(e.target.value)}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-gray-900"
-                      >
-                        <option value="">-- Choose From Consumables Library --</option>
-                        {freshConsumablesLibrary.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} (₹{c.approxPrice} / {c.unit === "Custom Unit" ? c.customUnit : c.unit})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">
-                        Quantity {currentConsumableObj ? `(${currentConsumableObj.unit === "Custom Unit" ? currentConsumableObj.customUnit : currentConsumableObj.unit})` : "*"}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={currentConsumableQty}
-                        onChange={(e) => setCurrentConsumableQty(Number(e.target.value))}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-center bg-white"
-                      />
-                    </div>
-
-                    <div className="md:col-span-3">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Usage / Placement Notes</label>
-                      <input
-                        placeholder="e.g. Cut into 4x4 squares"
-                        value={currentConsumableNotes}
-                        onChange={(e) => setCurrentConsumableNotes(e.target.value)}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-medium bg-white"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2 flex items-end">
-                      <button
-                        type="button"
-                        onClick={handleAddFreshConsumable}
-                        className="w-full bg-green-700 hover:bg-green-800 text-white font-black py-2 rounded-lg shadow"
-                      >
-                        + Add Item
-                      </button>
-                    </div>
-                  </div>
-
-                  {freshPurchases.length > 0 && (
-                    <div className="space-y-1.5 mt-2 font-mono">
-                      {freshPurchases.map((fp, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-green-200 shadow-sm">
-                          <div>
-                            <span className="font-bold text-green-950">
-                              ✨ {fp.quantity} {fp.unit} of {fp.item}
-                            </span>
-                            <span className="ml-2 font-bold text-gray-500">
-                              (₹{fp.unitPrice} × {fp.quantity} = ₹{fp.estimatedCost?.toLocaleString()})
-                            </span>
-                            {fp.notes && <span className="text-gray-400 italic ml-2">Note: {fp.notes}</span>}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setFreshPurchases(freshPurchases.filter((_, i) => i !== idx))}
-                            className="text-red-600 font-bold hover:underline"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* 5. 🌟 VENDOR RENTALS REQUIREMENT (DROPDOWN + MULTI-DAY + AUTO COST) */}
-                <div className="space-y-3 bg-indigo-50/60 p-4 rounded-xl border-2 border-indigo-300">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="font-black text-indigo-950 text-xs tracking-wide uppercase">
-                        5. Vendor Rentals (Trussing, Sound, Chairs, Generators)
-                      </h3>
-                      <p className="text-[11px] text-indigo-800">
-                        Select from vendor rental catalog with duration & quantity multipliers.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-indigo-900 bg-white px-2.5 py-1 rounded border border-indigo-300 font-mono">
-                        Rentals Total: ₹{totalRentalCost.toLocaleString()}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAddRentalModal(true)}
-                        className="bg-indigo-800 hover:bg-indigo-900 text-white font-black px-2.5 py-1 rounded text-[11px] shadow"
-                      >
-                        + New in Library
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white p-3 rounded-xl border border-indigo-200">
-                    <div className="md:col-span-4">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Select Rental Item *</label>
-                      <select
-                        value={currentRentalCatalogId}
-                        onChange={(e) => {
-                          const rId = e.target.value;
-                          setCurrentRentalCatalogId(rId);
-                          const obj = vendorRentalsLibrary.find((r) => r.id === rId);
-                          if (obj) {
-                            setCurrentRentalIsDayApplicable(Boolean(obj.isDayApplicable));
-                            if (obj.size) setCurrentRentalSize(obj.size);
-                          }
-                        }}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white text-gray-900"
-                      >
-                        <option value="">-- Choose From Rental Catalog --</option>
-                        {vendorRentalsLibrary.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            [{r.vendorName}] {r.itemName} - ₹{r.rate}/{r.pricingUnit === "Custom Unit" ? r.customUnit : r.pricingUnit}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Quantity *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={currentRentalQty}
-                        onChange={(e) => setCurrentRentalQty(Number(e.target.value))}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-center bg-white"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <div className="flex justify-between items-center mb-0.5">
-                        <label className="text-[11px] font-black text-gray-700">Days</label>
-                        <label className="text-[9px] font-bold text-indigo-800 flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={currentRentalIsDayApplicable}
-                            onChange={(e) => setCurrentRentalIsDayApplicable(e.target.checked)}
-                          />
-                          Per Day?
-                        </label>
+                    <button type="button" onClick={handleAddFreshItem} className="w-full bg-green-700 text-white font-bold p-1 rounded text-xs">+ Add Consumable</button>
+                    {freshPurchases.map((fp, idx) => (
+                      <div key={idx} className="flex justify-between text-xs bg-white p-1 rounded border">
+                        <span>📦 {fp.item} ({fp.qtyDescription})</span>
+                        <button type="button" onClick={() => setFreshPurchases(freshPurchases.filter((_, i) => i !== idx))} className="text-red-600 font-bold">✕</button>
                       </div>
-                      <input
-                        type="number"
-                        min="1"
-                        disabled={!currentRentalIsDayApplicable}
-                        value={currentRentalIsDayApplicable ? currentRentalDays : 1}
-                        onChange={(e) => setCurrentRentalDays(Number(e.target.value))}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-center bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-[11px] font-black text-gray-700 mb-0.5">Size / Dimensions</label>
-                      <input
-                        placeholder="e.g. 20x10 ft"
-                        value={currentRentalSize}
-                        onChange={(e) => setCurrentRentalSize(e.target.value)}
-                        className="w-full border-2 border-gray-300 p-2 rounded-lg font-medium bg-white"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2 flex items-end">
-                      <button
-                        type="button"
-                        onClick={handleAddVendorRental}
-                        className="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-black py-2 rounded-lg shadow"
-                      >
-                        + Add Rental
-                      </button>
-                    </div>
+                    ))}
                   </div>
 
-                  {vendorRentals.length > 0 && (
-                    <div className="space-y-1.5 mt-2 font-mono">
-                      {vendorRentals.map((vr, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-indigo-200 shadow-sm">
-                          <div>
-                            <span className="font-bold text-indigo-950">
-                              🚚 {vr.quantity}x {vr.item} {vr.size && `(${vr.size})`}
-                            </span>
-                            <span className="text-gray-500 ml-2 font-bold">
-                              [Supplier: {vr.vendorName || vr.vendorDetails}]
-                            </span>
-                            <span className="ml-2 font-bold text-indigo-700">
-                              (₹{vr.rate} × {vr.quantity} {vr.isDayApplicable ? `× ${vr.days} days` : ""} = ₹{vr.estimatedCost?.toLocaleString()})
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setVendorRentals(vendorRentals.filter((_, i) => i !== idx))}
-                            className="text-red-600 font-bold hover:underline"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
+                  <div className="bg-indigo-50/50 p-4 rounded-xl border-2 border-indigo-300 space-y-2">
+                    <h3 className="font-black text-indigo-900 text-xs uppercase">Vendor Rentals (Truss, Sound)</h3>
+                    <div className="grid grid-cols-12 gap-1.5">
+                      <input placeholder="Item" value={rentalItemName} onChange={(e) => setRentalItemName(e.target.value)} className="col-span-4 border p-1.5 rounded text-xs bg-white" />
+                      <input type="number" placeholder="Qty" value={rentalQty} onChange={(e) => setRentalQty(Number(e.target.value))} className="col-span-2 border p-1.5 rounded text-xs bg-white" />
+                      <input placeholder="Size" value={rentalSize} onChange={(e) => setRentalSize(e.target.value)} className="col-span-3 border p-1.5 rounded text-xs bg-white" />
+                      <input placeholder="Vendor" value={rentalVendorDetails} onChange={(e) => setRentalVendorDetails(e.target.value)} className="col-span-3 border p-1.5 rounded text-xs bg-white" />
                     </div>
-                  )}
+                    <button type="button" onClick={handleAddRental} className="w-full bg-indigo-700 text-white font-bold p-1 rounded text-xs">+ Add Rental</button>
+                    {vendorRentals.map((vr, idx) => (
+                      <div key={idx} className="flex justify-between text-xs bg-white p-1 rounded border">
+                        <span>🚚 {vr.quantity}x {vr.item} {vr.size && `(${vr.size})`}</span>
+                        <button type="button" onClick={() => setVendorRentals(vendorRentals.filter((_, i) => i !== idx))} className="text-red-600 font-bold">✕</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                {/* 6. Photos */}
-                <div className="space-y-3 bg-slate-50 p-4 rounded-xl border-2 border-slate-300">
-                  <label className="block text-xs font-black text-gray-900">
-                    📸 Reference Photos
-                  </label>
-                  
-                  {existingImages.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {existingImages.map((imgUrl, idx) => (
-                        <div key={idx} className="relative w-20 h-20 border rounded-lg overflow-hidden group">
-                          <img src={imgUrl} alt="Saved" className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => setExistingImages(existingImages.filter((_, i) => i !== idx))}
-                            className="absolute top-1 right-1 bg-red-600 text-white rounded w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={(e) => {
-                      if (e.target.files) setImageFiles(Array.from(e.target.files));
-                    }}
-                    className="block w-full border-2 border-dashed border-gray-400 rounded-lg p-2 bg-white cursor-pointer"
-                  />
-                </div>
-
-                {/* 7. Steps & Instructions */}
+                {/* 6. Assembly Steps & Instructions */}
                 <div className="space-y-3">
-                  <h3 className="font-black text-gray-800 text-xs tracking-wide uppercase border-b pb-1">
-                    7. Assembly Instructions & Notes
+                  <h3 className="font-black text-gray-800 text-sm tracking-wide uppercase border-b pb-1">
+                    5. Execution Steps & Instructions
                   </h3>
                   <div className="flex gap-2">
-                    <input
-                      placeholder="e.g. Step 1: Secure trussing base with 50kg sandbags"
-                      value={stepInput}
-                      onChange={(e) => setStepInput(e.target.value)}
-                      className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium bg-white"
-                    />
-                    <button type="button" onClick={handleAddStep} className="bg-gray-900 text-white px-4 py-2 rounded-lg font-bold">
-                      + Add Step
-                    </button>
+                    <input placeholder="Step guide (e.g. Step 1: Base trussing level)" value={stepInput} onChange={(e) => setStepInput(e.target.value)} className="w-full border-2 border-gray-400 p-2 rounded-lg text-xs" />
+                    <button type="button" onClick={handleAddStep} className="bg-black text-white px-4 py-2 rounded-lg font-bold text-xs">+ Add Step</button>
                   </div>
                   {steps.length > 0 && (
-                    <ol className="list-decimal list-inside space-y-1 bg-gray-50 p-2 rounded border font-semibold">
+                    <ol className="list-decimal list-inside space-y-1 bg-gray-50 p-3 rounded-lg border text-xs font-semibold">
                       {steps.map((st, idx) => (
                         <li key={idx} className="flex justify-between items-center">
                           <span>{st}</span>
@@ -1345,29 +1340,13 @@ export default function ComponentsPage() {
                       ))}
                     </ol>
                   )}
-                  <textarea
-                    rows={2}
-                    placeholder="General on-site precautions and labor notes..."
-                    value={writtenInstructions}
-                    onChange={(e) => setWrittenInstructions(e.target.value)}
-                    className="w-full border-2 border-gray-400 p-2 rounded-lg font-medium bg-white"
-                  />
+                  <textarea rows={2} placeholder="General notes & safety precautions..." value={writtenInstructions} onChange={(e) => setWrittenInstructions(e.target.value)} className="w-full border-2 border-gray-400 p-2.5 rounded-lg text-xs font-medium" />
                 </div>
 
                 {/* Footer Buttons */}
                 <div className="flex justify-end gap-3 pt-4 border-t-2 border-gray-300">
-                  <button
-                    type="button"
-                    onClick={() => setShowModal(false)}
-                    className="px-5 py-2.5 border-2 border-gray-400 text-gray-800 font-black rounded-lg hover:bg-gray-100"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-6 py-2.5 bg-blue-600 text-white font-black rounded-lg hover:bg-blue-700 shadow disabled:opacity-50"
-                  >
+                  <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 border-2 border-gray-400 text-gray-800 font-black rounded-lg hover:bg-gray-100">Cancel</button>
+                  <button type="submit" disabled={submitting} className="px-6 py-2.5 bg-blue-600 text-white font-black rounded-lg hover:bg-blue-700 shadow disabled:opacity-50">
                     {submitting ? "Saving Component..." : isEditing ? "Update Component" : "Save Component"}
                   </button>
                 </div>
@@ -1376,238 +1355,9 @@ export default function ComponentsPage() {
           </div>
         )}
 
-        {/* 🌟 MODAL 1: QUICK ADD CONSUMABLE TO MASTER CATALOG */}
-        {showAddConsumableModal && (
-          <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm font-sans">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 border-2 border-green-500 shadow-2xl space-y-4">
-              <div className="flex justify-between items-center border-b pb-2">
-                <h3 className="text-base font-black text-green-950 uppercase">
-                  Add Fresh Consumable to Catalog
-                </h3>
-                <button onClick={() => setShowAddConsumableModal(false)} className="text-gray-400 hover:text-black font-black">
-                  ✕
-                </button>
-              </div>
-
-              <form onSubmit={handleQuickCreateConsumable} className="space-y-3 text-xs">
-                <div>
-                  <label className="block font-black text-gray-800 mb-1 uppercase">Item Name *</label>
-                  <input
-                    required
-                    placeholder="e.g. Thermocol Sheets 2-inch, Flex 340gsm"
-                    value={newConsumableName}
-                    onChange={(e) => setNewConsumableName(e.target.value)}
-                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-black text-gray-800 mb-1 uppercase">Pricing Unit *</label>
-                    <select
-                      value={newConsumableUnit}
-                      onChange={(e) => setNewConsumableUnit(e.target.value)}
-                      className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white"
-                    >
-                      <option value="Per Meter">Per Meter</option>
-                      <option value="Per Sheet">Per Sheet</option>
-                      <option value="Per Pc">Per Pc</option>
-                      <option value="Per Box">Per Box</option>
-                      <option value="Per Roll">Per Roll</option>
-                      <option value="Custom Unit">Custom Unit...</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-black text-gray-800 mb-1 uppercase">Approx Price (₹) *</label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      placeholder="e.g. 150"
-                      value={newConsumablePrice}
-                      onChange={(e) => setNewConsumablePrice(Number(e.target.value))}
-                      className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-right bg-white font-mono"
-                    />
-                  </div>
-                </div>
-
-                {newConsumableUnit === "Custom Unit" && (
-                  <div>
-                    <label className="block font-black text-green-950 mb-1 uppercase">Custom Unit Name *</label>
-                    <input
-                      required
-                      placeholder="e.g. Per Bundle, Per 50 Pcs"
-                      value={newConsumableCustomUnit}
-                      onChange={(e) => setNewConsumableCustomUnit(e.target.value)}
-                      className="w-full border-2 border-green-400 p-2 rounded-lg font-bold bg-white"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block font-black text-gray-800 mb-1 uppercase">Sourcing Notes / Remarks</label>
-                  <input
-                    placeholder="e.g. Buy from Sadar Bazar hardware vendor"
-                    value={newConsumableRemarks}
-                    onChange={(e) => setNewConsumableRemarks(e.target.value)}
-                    className="w-full border-2 border-gray-300 p-2 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-3 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddConsumableModal(false)}
-                    className="px-4 py-2 border font-bold rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white font-black rounded-lg shadow"
-                  >
-                    Save Consumable
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* 🌟 MODAL 2: QUICK ADD VENDOR RENTAL TO MASTER CATALOG */}
-        {showAddRentalModal && (
-          <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm font-sans">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 border-2 border-indigo-500 shadow-2xl space-y-4">
-              <div className="flex justify-between items-center border-b pb-2">
-                <h3 className="text-base font-black text-indigo-950 uppercase">
-                  Add Vendor Rental to Catalog
-                </h3>
-                <button onClick={() => setShowAddRentalModal(false)} className="text-gray-400 hover:text-black font-black">
-                  ✕
-                </button>
-              </div>
-
-              <form onSubmit={handleQuickCreateRental} className="space-y-3 text-xs">
-                <div>
-                  <label className="block font-black text-gray-800 mb-1 uppercase">Vendor / Supplier Name *</label>
-                  <input
-                    required
-                    placeholder="e.g. Modern Trussing Co., Sharma Lights"
-                    value={newRentalVendor}
-                    onChange={(e) => setNewRentalVendor(e.target.value)}
-                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-black text-gray-800 mb-1 uppercase">Rental Item Name *</label>
-                  <input
-                    required
-                    placeholder="e.g. Heavy Duty Truss 20x10ft, Ghost Chair"
-                    value={newRentalItemName}
-                    onChange={(e) => setNewRentalItemName(e.target.value)}
-                    className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-black text-gray-800 mb-1 uppercase">Standard Size / Spec</label>
-                    <input
-                      placeholder="e.g. 20x10 ft, 15kVA"
-                      value={newRentalSize}
-                      onChange={(e) => setNewRentalSize(e.target.value)}
-                      className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-black text-gray-800 mb-1 uppercase">Rental Rate (₹) *</label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      placeholder="e.g. 4500"
-                      value={newRentalRate}
-                      onChange={(e) => setNewRentalRate(Number(e.target.value))}
-                      className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold text-right bg-white font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-black text-gray-800 mb-1 uppercase">Pricing Unit *</label>
-                    <select
-                      value={newRentalUnit}
-                      onChange={(e) => setNewRentalUnit(e.target.value)}
-                      className="w-full border-2 border-gray-300 p-2 rounded-lg font-bold bg-white"
-                    >
-                      <option value="Per Pc">Per Pc</option>
-                      <option value="Per Event">Per Event</option>
-                      <option value="Per Day">Per Day</option>
-                      <option value="Per Set">Per Set</option>
-                      <option value="Custom Unit">Custom Unit...</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center pt-5">
-                    <label className="flex items-center gap-2 cursor-pointer font-bold text-indigo-900">
-                      <input
-                        type="checkbox"
-                        checked={newRentalIsDayApplicable}
-                        onChange={(e) => setNewRentalIsDayApplicable(e.target.checked)}
-                        className="h-4 w-4"
-                      />
-                      <span>Multi-Day Multiplier?</span>
-                    </label>
-                  </div>
-                </div>
-
-                {newRentalUnit === "Custom Unit" && (
-                  <div>
-                    <label className="block font-black text-indigo-950 mb-1 uppercase">Custom Unit Name *</label>
-                    <input
-                      required
-                      placeholder="e.g. Per Section, Per Box"
-                      value={newRentalCustomUnit}
-                      onChange={(e) => setNewRentalCustomUnit(e.target.value)}
-                      className="w-full border-2 border-indigo-400 p-2 rounded-lg font-bold bg-white"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block font-black text-gray-800 mb-1 uppercase">Supplier Contact / Notes</label>
-                  <input
-                    placeholder="e.g. Ph: 98110..., Requires 3 hours setup notice"
-                    value={newRentalRemarks}
-                    onChange={(e) => setNewRentalRemarks(e.target.value)}
-                    className="w-full border-2 border-gray-300 p-2 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-3 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddRentalModal(false)}
-                    className="px-4 py-2 border font-bold rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-black rounded-lg shadow"
-                  >
-                    Save Rental Item
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* ELEMENT PICKER POPUP */}
+        {/* FULL SCREEN POPUP: PROPS PICKER (SMOOTH SCROLLING, CONTENT-START, NEVER SQUEEZES) */}
         {showElementPickerModal && (
-          <div className="fixed inset-0 z-50 bg-black/85 flex flex-col p-4 md:p-6 backdrop-blur-sm font-sans">
+          <div className="fixed inset-0 z-50 bg-black/85 flex flex-col p-4 md:p-6 backdrop-blur-sm">
             <div className="w-full h-full max-w-7xl mx-auto bg-white rounded-2xl flex flex-col overflow-hidden shadow-2xl border-2 border-gray-400">
               <div className="p-4 md:p-6 border-b-2 border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -1623,6 +1373,7 @@ export default function ComponentsPage() {
                 </div>
               </div>
 
+              {/* SMOOTH SCROLLABLE GRID: content-start ensures cards stack naturally without squashing */}
               <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 content-start">
                 {filteredElements.map((el) => {
                   const hasPic = el.images?.[0] || el.imageUrl;
@@ -1632,7 +1383,7 @@ export default function ComponentsPage() {
                     <div
                       key={el.id}
                       onClick={() => { setCurrentSelectedElement(el); setShowElementPickerModal(false); }}
-                      className="bg-white border-2 border-gray-300 hover:border-amber-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between h-auto min-h-[340px]"
+                      className="bg-white border-2 border-gray-300 hover:border-amber-600 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between h-auto min-h-[360px]"
                     >
                       <div>
                         <div className="h-44 w-full bg-gray-100 relative overflow-hidden flex items-center justify-center flex-shrink-0">
@@ -1647,8 +1398,8 @@ export default function ComponentsPage() {
                         <div className="p-3.5 space-y-1">
                           <span className="text-[10px] font-black uppercase text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">{el.category}</span>
                           <h4 className="font-black text-sm text-gray-900 mt-1 leading-snug group-hover:text-amber-800 line-clamp-2">{el.name}</h4>
-                          <p className="text-[11px] text-gray-600 font-bold pt-1 font-mono">
-                            Stock: <strong className={liveStock > 0 ? "text-blue-700" : "text-red-600 font-black"}>{liveStock} units</strong>
+                          <p className="text-[11px] text-gray-600 font-bold pt-1">
+                            📦 Warehouse Stock: <strong className={liveStock > 0 ? "text-blue-700" : "text-red-600 font-black"}>{liveStock} units</strong>
                           </p>
                         </div>
                       </div>
@@ -1661,14 +1412,19 @@ export default function ComponentsPage() {
                     </div>
                   );
                 })}
+
+                {filteredElements.length === 0 && (
+                  <div className="col-span-full py-16 text-center text-gray-500 font-bold">
+                    No elements found matching this filter.
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
-
-        {/* VIEW COMPONENT DETAILS MODAL */}
+        {/* VIEW COMPONENT DETAILS MODAL (READ-ONLY) */}
         {viewComponentData && (
-          <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 md:p-6 z-50 backdrop-blur-sm font-sans">
+          <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 md:p-6 z-50 backdrop-blur-sm">
             <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border-2 border-gray-400">
               <div className="p-4 md:p-6 border-b-2 border-gray-200 bg-gray-50 flex justify-between items-center">
                 <div>
@@ -1686,60 +1442,157 @@ export default function ComponentsPage() {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs font-mono">
-                {/* Flowers */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="flex flex-col md:flex-row gap-6">
+                  {/* Left: Images Grid (Click to expand) */}
+                  <div className="md:w-1/2 space-y-3">
+                    {viewComponentData.images?.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {viewComponentData.images.map((imgUrl: string, idx: number) => (
+                          <div 
+                            key={idx} 
+                            onClick={() => setLightboxImageUrl(imgUrl)}
+                            className={`bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300 cursor-zoom-in hover:opacity-90 transition ${idx === 0 ? "col-span-2 h-64" : "h-32"}`}
+                            title="Click to view full screen"
+                          >
+                            <img src={imgUrl} alt={`${viewComponentData.name} - ${idx}`} className="w-full h-full object-cover" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="w-full h-64 bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300 flex items-center justify-center text-xs font-bold text-gray-400">
+                        No Photo
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Specifications */}
+                  <div className="md:w-1/2 space-y-4 text-sm">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                      <h4 className="font-black text-xs uppercase text-gray-500 border-b pb-1">Specifications</h4>
+                      {viewComponentData.theme && <p>🎨 <strong>Theme:</strong> {viewComponentData.theme}</p>}
+                      <p>📐 <strong>Dimensions:</strong> {viewComponentData.dimensions?.length}×{viewComponentData.dimensions?.width}×{viewComponentData.dimensions?.height} {viewComponentData.dimensions?.unit}</p>
+                      <p>💰 <strong>Base Cost:</strong> ₹{viewComponentData.baseCost?.toLocaleString()}</p>
+                      
+                      {viewComponentData.events?.length > 0 && (
+                        <div className="pt-2">
+                          <strong className="block text-xs mb-1">Assigned Events:</strong>
+                          <div className="flex flex-wrap gap-1">
+                            {viewComponentData.events.map((ev: string, idx: number) => (
+                              <span key={idx} className="bg-purple-100 text-purple-900 font-bold px-2 py-0.5 rounded text-[10px]">
+                                {ev}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Warehouse Props List */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-sm uppercase text-gray-800 border-b pb-1">📦 Attached Warehouse Props</h4>
+                  {viewComponentData.warehouseElements?.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {viewComponentData.warehouseElements.map((el: any, idx: number) => (
+                        <div key={idx} className="bg-white border border-gray-200 p-3 rounded-lg flex items-center gap-3 shadow-sm">
+                          <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden border flex-shrink-0">
+                            {el.imageUrl ? <img src={el.imageUrl} alt={el.elementName} className="w-full h-full object-cover" /> : <span className="text-[8px] text-gray-400 flex items-center justify-center h-full">No Pic</span>}
+                          </div>
+                          <div className="text-xs">
+                            <p className="font-bold text-gray-900">{el.quantity}x {el.elementName}</p>
+                            {el.notes && <p className="text-gray-500 italic mt-0.5">Note: {el.notes}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic">No warehouse props assigned.</p>
+                  )}
+                </div>
+
+                {/* Natural Flowers List */}
                 <div className="space-y-2">
                   <h4 className="font-black text-sm uppercase text-pink-900 border-b pb-1">🌸 Natural Flowers</h4>
                   {viewComponentData.naturalFlowers?.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {viewComponentData.naturalFlowers.map((fl: any, idx: number) => (
-                        <div key={idx} className="bg-pink-50 border border-pink-200 p-3 rounded-lg shadow-sm">
+                        <div key={idx} className="bg-pink-50 border border-pink-200 p-3 rounded-lg text-xs shadow-sm">
                           <p className="font-black text-pink-950">{fl.quantity} {fl.unit} of {fl.flowerName}</p>
-                          <p className="text-[10px] text-gray-500">₹{fl.approxPrice} × {fl.quantity} = ₹{(fl.approxPrice * fl.quantity).toLocaleString()}</p>
+                          {fl.notes && <p className="text-pink-800 italic mt-0.5">Note: {fl.notes}</p>}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-gray-400 italic">No natural flowers assigned.</p>
+                    <p className="text-xs text-gray-500 italic">No natural flowers assigned.</p>
                   )}
                 </div>
 
-                {/* Fresh Consumables */}
+                {/* Fresh Consumables List */}
                 <div className="space-y-2">
-                  <h4 className="font-black text-sm uppercase text-green-900 border-b pb-1">✨ General Consumables</h4>
+                  <h4 className="font-black text-sm uppercase text-green-900 border-b pb-1">📦 General Consumables</h4>
                   {viewComponentData.freshPurchases?.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {viewComponentData.freshPurchases.map((fp: any, idx: number) => (
-                        <div key={idx} className="bg-green-50 border border-green-200 p-3 rounded-lg shadow-sm">
-                          <p className="font-black text-green-950">
-                            {fp.quantity ? `${fp.quantity} ${fp.unit} of ` : ""}{fp.item} {fp.qtyDescription && !fp.quantity ? `(${fp.qtyDescription})` : ""}
-                          </p>
-                          <p className="text-[10px] text-gray-500">Cost: ₹{fp.estimatedCost?.toLocaleString()}</p>
+                        <div key={idx} className="bg-green-50 border border-green-200 p-3 rounded-lg text-xs shadow-sm">
+                          <p className="font-black text-green-950">{fp.item} ({fp.qtyDescription})</p>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-gray-400 italic">No fresh consumables assigned.</p>
+                    <p className="text-xs text-gray-500 italic">No fresh consumables assigned.</p>
                   )}
                 </div>
 
-                {/* Vendor Rentals */}
+                {/* Vendor Rentals List */}
                 <div className="space-y-2">
                   <h4 className="font-black text-sm uppercase text-indigo-900 border-b pb-1">🚚 Vendor Rentals</h4>
                   {viewComponentData.vendorRentals?.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {viewComponentData.vendorRentals.map((vr: any, idx: number) => (
-                        <div key={idx} className="bg-indigo-50 border border-indigo-200 p-3 rounded-lg shadow-sm">
+                        <div key={idx} className="bg-indigo-50 border border-indigo-200 p-3 rounded-lg text-xs shadow-sm">
                           <p className="font-black text-indigo-950">{vr.quantity}x {vr.item} {vr.size && `(${vr.size})`}</p>
-                          <p className="text-[10px] text-gray-600">Vendor: {vr.vendorName || vr.vendorDetails || "TBD"}</p>
-                          <p className="text-[10px] text-indigo-800 font-bold">Estimated Cost: ₹{vr.estimatedCost?.toLocaleString()}</p>
+                          {vr.vendorDetails && <p className="text-indigo-800 italic mt-0.5">Vendor: {vr.vendorDetails}</p>}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-gray-400 italic">No vendor rentals assigned.</p>
+                    <p className="text-xs text-gray-500 italic">No vendor rentals assigned.</p>
                   )}
                 </div>
+
+                {/* FULL SCREEN LIGHTBOX MODAL */}
+        {lightboxImageUrl && (
+          <div
+            onClick={() => setLightboxImageUrl(null)}
+            className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4 cursor-zoom-out"
+          >
+            <button
+              onClick={() => setLightboxImageUrl(null)}
+              className="absolute top-4 right-4 bg-white/20 hover:bg-red-600 text-white font-black px-4 py-2 rounded-full text-xs transition"
+            >
+              ✕ Close
+            </button>
+            <img 
+              src={lightboxImageUrl} 
+              alt="Fullscreen View" 
+              className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl border border-gray-700 bg-black" 
+            />
+          </div>
+        )}
+
+                {/* Assembly Steps */}
+                {viewComponentData.steps?.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-black text-sm uppercase text-gray-800 border-b pb-1">🪜 Assembly Steps</h4>
+                    <ol className="list-decimal list-inside space-y-1 bg-gray-50 p-3 rounded-lg border text-xs font-semibold text-gray-800">
+                      {viewComponentData.steps.map((st: string, idx: number) => (
+                        <li key={idx}>{st}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
               </div>
             </div>
           </div>

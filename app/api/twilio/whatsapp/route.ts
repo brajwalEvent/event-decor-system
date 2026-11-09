@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, storage } from "../../../../lib/firebase";
-import { collectionGroup, getDocs, updateDoc, doc, collection, addDoc, query, where, limit } from "firebase/firestore";
+import { getDoc, doc, updateDoc, collection, addDoc, query, where, getDocs, collectionGroup, orderBy, limit } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export const maxDuration = 60;
@@ -34,50 +34,61 @@ export async function POST(req: Request) {
 
     const tenDigitPhone = cleanSenderPhone.slice(-10);
 
-    // 1. FAST GUEST MATCHING (< 150ms)
+    // 1. ACCURATE MULTI-WEDDING ROUTING
+    // Check phone_routing to identify the last wedding communicating with this guest
+    let targetHandoverId: string | null = null;
+    let targetGuestId: string | null = null;
     let matchedGuestDoc: any = null;
 
     try {
-      const qClean = query(collectionGroup(db, "rsvps"), where("cleanPhone", "==", tenDigitPhone), limit(1));
-      const snapClean = await getDocs(qClean);
-      if (!snapClean.empty) matchedGuestDoc = snapClean.docs[0];
+      const routingSnap = await getDoc(doc(db, "phone_routing", tenDigitPhone));
+      if (routingSnap.exists()) {
+        const rData = routingSnap.data();
+        const candidateGuestSnap = await getDoc(doc(db, "handovers", rData.handoverId, "rsvps", rData.guestId));
+        if (candidateGuestSnap.exists()) {
+          targetHandoverId = rData.handoverId;
+          targetGuestId = rData.guestId;
+          matchedGuestDoc = candidateGuestSnap;
+          console.log(`[Twilio Inbound Routing] Matched to Wedding: ${targetHandoverId}, Guest: ${targetGuestId}`);
+        }
+      }
     } catch (e) {
-      // ignore
+      console.warn("phone_routing lookup skipped:", e);
     }
 
+    // Fallback: If not registered in phone_routing, find the most recently updated RSVP record
     if (!matchedGuestDoc) {
-      for (const candidate of [tenDigitPhone, cleanSenderPhone, `+91${tenDigitPhone}`, `+${cleanSenderPhone}`]) {
-        try {
-          const qDirect = query(collectionGroup(db, "rsvps"), where("phone", "==", candidate), limit(1));
-          const snapDirect = await getDocs(qDirect);
-          if (!snapDirect.empty) {
-            matchedGuestDoc = snapDirect.docs[0];
-            break;
-          }
-        } catch (e) {
-          // ignore
+      try {
+        const qClean = query(
+          collectionGroup(db, "rsvps"),
+          where("cleanPhone", "==", tenDigitPhone),
+          orderBy("lastMessageAt", "desc"),
+          limit(1)
+        );
+        const snapClean = await getDocs(qClean);
+        if (!snapClean.empty) {
+          matchedGuestDoc = snapClean.docs[0];
+          targetGuestId = matchedGuestDoc.id;
+          targetHandoverId = matchedGuestDoc.ref.parent.parent?.id || null;
+        }
+      } catch (e) {
+        // Fallback without orderBy
+        const qSimple = query(collectionGroup(db, "rsvps"), where("cleanPhone", "==", tenDigitPhone), limit(1));
+        const snapSimple = await getDocs(qSimple);
+        if (!snapSimple.empty) {
+          matchedGuestDoc = snapSimple.docs[0];
+          targetGuestId = matchedGuestDoc.id;
+          targetHandoverId = matchedGuestDoc.ref.parent.parent?.id || null;
         }
       }
     }
 
-    // Fallback scan if indexes are not yet built
-    if (!matchedGuestDoc) {
-      const allRsvpsSnap = await getDocs(collectionGroup(db, "rsvps"));
-      for (const d of allRsvpsSnap.docs) {
-        const guestPhoneClean = (d.data().phone || "").replace(/[^0-9]/g, "");
-        if (guestPhoneClean.slice(-10) === tenDigitPhone) {
-          matchedGuestDoc = d;
-          break;
-        }
-      }
-    }
-
-    if (!matchedGuestDoc) {
-      console.warn(`[Twilio Inbound] No guest record matched phone ${cleanSenderPhone}`);
+    if (!matchedGuestDoc || !targetHandoverId || !targetGuestId) {
+      console.warn(`[Twilio Inbound] No guest record found for ${cleanSenderPhone}`);
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // 2. DOWNLOAD FROM TWILIO & UPLOAD TO FIREBASE STORAGE INLINE (~1.2s)
+    // 2. DOWNLOAD FROM TWILIO & UPLOAD TO FIREBASE STORAGE
     const finalizedMediaUrls: string[] = [];
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -126,9 +137,9 @@ export async function POST(req: Request) {
       messageBody = isPdf ? "📄 Sent a PDF Document" : "📷 Sent a Photo/ID";
     }
 
-    // 3. WRITE TO FIRESTORE
+    // 3. WRITE INBOUND MESSAGE TO FIRESTORE
     const guestData = matchedGuestDoc.data();
-    const guestDocPath = matchedGuestDoc.ref.path;
+    const guestDocPath = `handovers/${targetHandoverId}/rsvps/${targetGuestId}`;
 
     await addDoc(collection(db, guestDocPath, "messages"), {
       direction: "inbound",
@@ -140,14 +151,14 @@ export async function POST(req: Request) {
       senderName: guestData.name || "Guest",
     });
 
-    // 4. 2-HOUR AUTO-REPLY LOGIC
+    // 4. AUTO-REPLY LOGIC (2 HOURS COOLDOWN)
     const lastInboundTime = guestData.lastGuestInboundAt ? new Date(guestData.lastGuestInboundAt).getTime() : 0;
     const now = Date.now();
     const shouldSendAutoReply = !lastInboundTime || now - lastInboundTime > 2 * 60 * 60 * 1000;
 
     let replyText = "";
     if (shouldSendAutoReply) {
-      replyText = "Namaste, We have received your message and our team will get back to you ASAP. Regards, Team Brajwal";
+      replyText = "Namaste, We have received your message and IDs. Our hospitality team will verify and get back to you shortly. Regards, Team Brajwal";
 
       await addDoc(collection(db, guestDocPath, "messages"), {
         direction: "outbound",
@@ -159,7 +170,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. UPDATE GUEST DOCUMENT WITH PERMANENT ID URLS
+    // 5. UPDATE GUEST DOCUMENT
     const currentIds = guestData.idCardUrls || [];
     await updateDoc(doc(db, guestDocPath), {
       idCardUrls: [...currentIds, ...finalizedMediaUrls],
