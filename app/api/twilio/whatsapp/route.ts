@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, storage } from "../../../../lib/firebase";
-import { getDoc, doc, updateDoc, collection, addDoc, query, where, getDocs, collectionGroup, orderBy, limit } from "firebase/firestore";
+import { getDoc, doc, updateDoc, collection, addDoc, query, where, getDocs, collectionGroup, orderBy, limit, arrayUnion } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export const maxDuration = 60;
@@ -112,7 +112,9 @@ export async function POST(req: Request) {
               ? "png"
               : "jpg";
 
-            const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${i}.${ext}`;
+            // Add random salt so multiple simultaneous uploads in the same millisecond don't overwrite each other
+            const randomSalt = Math.random().toString(36).substring(2, 7);
+            const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${randomSalt}_${i}.${ext}`;
             const storageRef = ref(storage, fileName);
 
             await uploadBytes(storageRef, new Uint8Array(arrayBuffer), {
@@ -170,10 +172,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. UPDATE GUEST DOCUMENT
-    const currentIds = guestData.idCardUrls || [];
+    // 5. UPDATE GUEST DOCUMENT (Uses atomic arrayUnion so concurrent webhooks don't overwrite files)
     await updateDoc(doc(db, guestDocPath), {
-      idCardUrls: [...currentIds, ...finalizedMediaUrls],
+      ...(finalizedMediaUrls.length > 0 ? { idCardUrls: arrayUnion(...finalizedMediaUrls) } : {}),
       lastMessage: messageBody || "Replied on WhatsApp",
       lastMessageAt: new Date().toISOString(),
       lastGuestInboundAt: new Date().toISOString(),
