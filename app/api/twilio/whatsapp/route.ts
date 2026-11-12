@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import { db, storage } from "../../../../lib/firebase";
-import { getDoc, doc, updateDoc, collection, addDoc, query, where, getDocs, collectionGroup, orderBy, limit, arrayUnion } from "firebase/firestore";
+import { 
+  getDoc, 
+  doc, 
+  updateDoc, 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  getDocs, 
+  collectionGroup, 
+  orderBy, 
+  limit, 
+  arrayUnion, 
+  runTransaction 
+} from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export const maxDuration = 60;
@@ -35,7 +49,6 @@ export async function POST(req: Request) {
     const tenDigitPhone = cleanSenderPhone.slice(-10);
 
     // 1. ACCURATE MULTI-WEDDING ROUTING
-    // Check phone_routing to identify the last wedding communicating with this guest
     let targetHandoverId: string | null = null;
     let targetGuestId: string | null = null;
     let matchedGuestDoc: any = null;
@@ -49,14 +62,13 @@ export async function POST(req: Request) {
           targetHandoverId = rData.handoverId;
           targetGuestId = rData.guestId;
           matchedGuestDoc = candidateGuestSnap;
-          console.log(`[Twilio Inbound Routing] Matched to Wedding: ${targetHandoverId}, Guest: ${targetGuestId}`);
         }
       }
     } catch (e) {
       console.warn("phone_routing lookup skipped:", e);
     }
 
-    // Fallback: If not registered in phone_routing, find the most recently updated RSVP record
+    // Fallback if not registered in phone_routing
     if (!matchedGuestDoc) {
       try {
         const qClean = query(
@@ -72,7 +84,6 @@ export async function POST(req: Request) {
           targetHandoverId = matchedGuestDoc.ref.parent.parent?.id || null;
         }
       } catch (e) {
-        // Fallback without orderBy
         const qSimple = query(collectionGroup(db, "rsvps"), where("cleanPhone", "==", tenDigitPhone), limit(1));
         const snapSimple = await getDocs(qSimple);
         if (!snapSimple.empty) {
@@ -88,7 +99,35 @@ export async function POST(req: Request) {
       return new Response("<Response></Response>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // 2. DOWNLOAD FROM TWILIO & UPLOAD TO FIREBASE STORAGE
+    const guestDocPath = `handovers/${targetHandoverId}/rsvps/${targetGuestId}`;
+    const guestDocRef = doc(db, guestDocPath);
+
+    // 2. ATOMIC AUTO-REPLY CHECK (LOCKS IN <50ms TO PREVENT DOUBLE MESSAGES)
+    let shouldSendAutoReply = false;
+    try {
+      await runTransaction(db, async (transaction) => {
+        const freshSnap = await transaction.get(guestDocRef);
+        if (!freshSnap.exists()) return;
+        const freshData = freshSnap.data();
+
+        const lastReplyTime = freshData.lastAutoReplyAt 
+          ? new Date(freshData.lastAutoReplyAt).getTime() 
+          : 0;
+        const now = Date.now();
+
+        // 2-hour cooldown. If another image arrives 1s or 10s later, this check immediately fails.
+        if (!lastReplyTime || now - lastReplyTime > 2 * 60 * 60 * 1000) {
+          shouldSendAutoReply = true;
+          transaction.update(guestDocRef, {
+            lastAutoReplyAt: new Date().toISOString(),
+          });
+        }
+      });
+    } catch (txErr) {
+      console.warn("[Auto-Reply Transaction Error]:", txErr);
+    }
+
+    // 3. DOWNLOAD FROM TWILIO & UPLOAD TO FIREBASE STORAGE
     const finalizedMediaUrls: string[] = [];
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -112,7 +151,6 @@ export async function POST(req: Request) {
               ? "png"
               : "jpg";
 
-            // Add random salt so multiple simultaneous uploads in the same millisecond don't overwrite each other
             const randomSalt = Math.random().toString(36).substring(2, 7);
             const fileName = `id_cards/${cleanSenderPhone}_${Date.now()}_${randomSalt}_${i}.${ext}`;
             const storageRef = ref(storage, fileName);
@@ -139,10 +177,8 @@ export async function POST(req: Request) {
       messageBody = isPdf ? "📄 Sent a PDF Document" : "📷 Sent a Photo/ID";
     }
 
-    // 3. WRITE INBOUND MESSAGE TO FIRESTORE
+    // 4. WRITE INBOUND MESSAGE TO FIRESTORE
     const guestData = matchedGuestDoc.data();
-    const guestDocPath = `handovers/${targetHandoverId}/rsvps/${targetGuestId}`;
-
     await addDoc(collection(db, guestDocPath, "messages"), {
       direction: "inbound",
       body: messageBody || "Replied on WhatsApp",
@@ -153,11 +189,7 @@ export async function POST(req: Request) {
       senderName: guestData.name || "Guest",
     });
 
-    // 4. AUTO-REPLY LOGIC (2 HOURS COOLDOWN)
-    const lastInboundTime = guestData.lastGuestInboundAt ? new Date(guestData.lastGuestInboundAt).getTime() : 0;
-    const now = Date.now();
-    const shouldSendAutoReply = !lastInboundTime || now - lastInboundTime > 2 * 60 * 60 * 1000;
-
+    // 5. IF THIS REQUEST WON THE LOCK, RECORD AUTO-REPLY IN CHAT
     let replyText = "";
     if (shouldSendAutoReply) {
       replyText = "Namaste, We have received your message and IDs. Our hospitality team will verify and get back to you shortly. Regards, Team Brajwal";
@@ -172,8 +204,8 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. UPDATE GUEST DOCUMENT (Uses atomic arrayUnion so concurrent webhooks don't overwrite files)
-    await updateDoc(doc(db, guestDocPath), {
+    // 6. UPDATE GUEST DOCUMENT (Uses arrayUnion so images don't overwrite each other)
+    await updateDoc(guestDocRef, {
       ...(finalizedMediaUrls.length > 0 ? { idCardUrls: arrayUnion(...finalizedMediaUrls) } : {}),
       lastMessage: messageBody || "Replied on WhatsApp",
       lastMessageAt: new Date().toISOString(),
@@ -183,6 +215,7 @@ export async function POST(req: Request) {
       ...(finalizedMediaUrls.length > 0 ? { status: "IDs Received" } : {}),
     });
 
+    // Send auto-reply only for the first message; second message returns empty XML
     if (replyText) {
       const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText}</Message></Response>`;
       return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
